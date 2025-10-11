@@ -1,7 +1,4 @@
-<p align="center">
-<img alt="TextHeroes-Logo" src="[App/logo.png](https://github.com/Keyditor/TextHeroes/blob/main/token_1.png)"/>
-</p>
-
+![Logo](https://github.com/Keyditor/TextHeroes/blob/main/token_1.png)
 
 # TextHeroes ⚔️
 
