@@ -10,10 +10,16 @@ Este projeto foi criado com a intenção de ser um ponto de partida para desenvo
 *   **Combate Tático**: Batalhas por turnos com opções de ataque, defesa, habilidades e uso de itens.
 *   **Progressão**: Ganho de XP, sistema de níveis e distribuição de pontos de atributo.
 *   **Inimigos Variados**: Um bestiário com mais de 45 inimigos, incluindo monstros de **Elite** com recompensas maiores.
-*   **Sistema de Itens**: Centenas de itens, incluindo armas, armaduras e consumíveis.
+*   **Sistema de Itens**: Diversos tipos de itens, incluindo armas, armaduras, consumíveis e materiais.
 *   **Aprimoramento de Equipamentos**: Melhore seus equipamentos até +13 usando gemas especiais.
 *   **Economia**: Lojas para compra/venda e um mercado completo entre jogadores.
 *   **Missões**: Sistema de quests diárias e semanais com recompensas variadas.
+
+## Expansão de Conteúdo
+
+Os itens, inimigos, quests e habilidades podem ser adicionados inserindo novas linhas no banco de dados `rpg_data.db`. Para fazer isso, você pode utilizar um editor de banco de dados SQLite.
+
+Siga o [**Guia de Expansão**](https://github.com/Keyditor/TextHeroes/blob/main/EXPANSION.md) caso tenha duvidas.
 
 ## Configuração
 
@@ -31,6 +37,7 @@ Para rodar o TextHeroes no seu próprio servidor, siga estes passos:
     ```
 
 3.  **Crie o Arquivo de Configuração**
+
     Crie um arquivo chamado `config.py` na raiz do projeto e adicione as seguintes linhas, substituindo os valores conforme necessário:
 
     ```python
