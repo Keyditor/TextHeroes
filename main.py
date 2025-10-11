@@ -3,7 +3,7 @@ from discord.ext import commands
 import asyncio
 
 import random
-from config import DISCORD_BOT_TOKEN, GENERAL_CHANNEL_NAME
+from config import DISCORD_BOT_TOKEN, GENERAL_CHANNEL_NAME, OWNER_ID
 import database
 
 # --- Configurações do Bot ---
@@ -94,6 +94,27 @@ async def on_ready():
     """Evento disparado quando o bot está online."""
     print(f'Bot conectado como {bot.user.name} (ID: {bot.user.id})')
     print('------')
+
+    # Verificação de autenticidade do criador
+    try:
+        owner = await bot.fetch_user(OWNER_ID)
+        # O nome de usuário no Discord (sem o #) é único e não diferencia maiúsculas/minúsculas na verificação.
+        if owner.name.lower() != "keyditor":
+            print("="*50)
+            print("ERRO DE AUTENTICAÇÃO: O ID do proprietário não corresponde a 'Keyditor'.")
+            print("Por favor, mantenha os créditos ao criador original conforme a licença.")
+            print("O bot não será inicializado.")
+            print("="*50)
+            await bot.close()
+            return
+    except discord.NotFound:
+        print("="*50)
+        print(f"ERRO: O ID do proprietário ({OWNER_ID}) definido em config.py não foi encontrado.")
+        print("O bot não será inicializado.")
+        print("="*50)
+        await bot.close()
+        return
+
     database.init_db() # Garante que o DB está inicializado ao iniciar o bot
 
 @bot.event
@@ -1924,12 +1945,20 @@ async def reset_character(ctx):
 async def gm_command(ctx):
     embed = discord.Embed(
         title="Créditos do TextHeroes",
-        description="Este bot foi desenvolvido com ❤️ por **@Keyditor**.",
+        description=f"Este bot foi desenvolvido com ❤️ por <@{OWNER_ID}>.",
         color=discord.Color.from_rgb(114, 137, 218) # Discord Blurple
     )
-    embed.add_field(name="GitHub", value="Visite o repositório do projeto!") # Substitua pela URL correta
+    embed.add_field(name="GitHub", value="https://github.com/Keyditor/TextHeroes-RPG-BOT")
     embed.set_footer(text="Sinta-se livre para usar este código como base para seus próprios projetos!")
     await ctx.send(embed=embed)
+
+    # Envia uma notificação para o dono do bot
+    try:
+        owner = await bot.fetch_user(OWNER_ID)
+        if owner:
+            await owner.send(f"ℹ️ O comando `!gm` foi usado no servidor **'{ctx.guild.name}'** pelo usuário **{ctx.author.name}** (`{ctx.author.id}`).")
+    except Exception as e:
+        print(f"Não foi possível enviar a notificação para o dono do bot: {e}")
 
 # --- Executar o Bot ---
 

@@ -1,3 +1,6 @@
+
+  ![Logo](https://github.com/Keyditor/TextHeroes/blob/main/token_1.png)
+
 # TextHeroes ⚔️
 
 Bem-vindo ao **TextHeroes**! Um bot de RPG de texto completo e de código aberto para Discord, projetado para ser uma base robusta para suas próprias aventuras. Crie personagens, lute contra monstros, colete itens, negocie com outros jogadores e muito mais!
