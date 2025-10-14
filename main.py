@@ -17,6 +17,11 @@ intents.members = True          # Necessário para gerenciar membros e permissõ
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# --- Gerenciamento de Estado Global ---
+pvp_invitations = {} # Armazena convites de duelo {desafiado_id: desafiante_id}
+active_pvp_battles = {} # Armazena batalhas ativas {user_id: battle_instance}
+DEBUG_MODE = False # Controla a exibição de logs de cálculo no console
+
 # --- Constantes do Jogo ---
 
 RACES = ["Humano", "Elfo", "Anão", "Halfling", "Meio-Orc", "Thiefling"]
@@ -1049,8 +1054,9 @@ async def shop_sell(ctx, *args):
     item_to_sell = None
     inv_item_data = None
     for item_data in inventory:
-        if item_name.lower() in item_data[2].lower():
-            item_to_sell = database.get_item_by_name(item_data[2])
+        # item_data[3] é o nome do item
+        if item_name.lower() in item_data[3].lower():
+            item_to_sell = database.get_item_by_name(item_data[3])
             inv_item_data = item_data
             break
     
@@ -1058,9 +1064,9 @@ async def shop_sell(ctx, *args):
         await ctx.send(f"Você não possui o item '{item_name}' para vender.")
         return
 
-    # inv_item_data: (id, quantity, name, ...)
-    inv_quantity = inv_item_data[1] 
-    enhancement_level = inv_item_data[8]
+    # inv_item_data: (inv_id, item_id, quantity, name, ..., enhancement_level)
+    inv_quantity = inv_item_data[2] 
+    enhancement_level = inv_item_data[9]
 
     if inv_quantity < quantity:
         await ctx.send(f"Você não tem itens suficientes para vender. Você possui apenas {inv_quantity}x **{item_to_sell['name']}**.")
@@ -1342,7 +1348,7 @@ async def equip(ctx, *, item_name: str):
         await ctx.send(f"Item '{item_name}' não encontrado no seu inventário. Tente usar o ID do item (`!inv`).")
         return
 
-    inventory_id, item_id, _, name, _, _, _, _, equip_slot, _ = item_to_equip_data
+    inventory_id, item_id, _, name, _, _, _, _, _, _ = item_to_equip_data
     item_details = database.get_item_by_id(item_id)
 
     if not item_details.get('equip_slot'):
@@ -1617,9 +1623,10 @@ async def custom_help(ctx, *, command_name: str = None):
         embed = discord.Embed(title="📜 Guia de Comandos do RPG 📜", description="Aqui estão os comandos que você pode usar:", color=discord.Color.blurple())
         
         categories = {
-            "Personagem": ["newchar", "char", "skills", "quest", "bestiary", "market", "reset"],
-            "Ação": ["hunt", "autohunt", "use", "shop"],
-            "Equipamento": ["inventory", "equip", "unequip"]
+            "Personagem": ["newchar", "char", "skills", "quest", "bestiary", "reset"],
+            "Ação": ["hunt", "autohunt", "use", "pvp"],
+            "Interação": ["shop", "market"],
+            "Equipamento": ["inventory", "equip", "unequip", "enhance"]
         }
         for category, cmd_list in categories.items():
             cmd_descriptions = "\n".join([f"`!{bot.get_command(c).name}` - {bot.get_command(c).help}" for c in cmd_list if bot.get_command(c)])
@@ -1959,6 +1966,407 @@ async def gm_command(ctx):
             await owner.send(f"ℹ️ O comando `!gm` foi usado no servidor **'{ctx.guild.name}'** pelo usuário **{ctx.author.name}** (`{ctx.author.id}`).")
     except Exception as e:
         print(f"Não foi possível enviar a notificação para o dono do bot: {e}")
+
+@bot.command(name="debug", help="Ativa ou desativa o modo de debug para o console.")
+@commands.is_owner() # Apenas o dono do bot (definido na inicialização) pode usar
+async def debug_mode(ctx):
+    global DEBUG_MODE
+    DEBUG_MODE = not DEBUG_MODE
+    status = "ATIVADO" if DEBUG_MODE else "DESATIVADO"
+    await ctx.send(f"🔧 Modo de Debug foi **{status}**.")
+
+@debug_mode.error
+async def debug_mode_error(ctx, error):
+    if isinstance(error, commands.NotOwner):
+        await ctx.send("Apenas o proprietário do bot pode usar este comando.")
+
+# --- Sistema de PvP ---
+
+class PVPBattle:
+    def __init__(self, p1_char, p2_char, ranked=False):
+        self.p1 = p1_char
+        self.p2 = p2_char
+        self.p1_hp = p1_char['max_hp']
+        self.p2_hp = p2_char['max_hp']
+        self.p1_mp = p1_char['max_mp']
+        self.p2_mp = p2_char['max_mp']
+        self.ranked = ranked
+        _, self.p1_bonuses = database.get_equipped_items(p1_char['user_id'])
+        _, self.p2_bonuses = database.get_equipped_items(p2_char['user_id'])
+        self.turn = p1_char['user_id'] # p1 começa
+        self.log = []
+        self.turn_count = 1
+        self.p1_effects = {} # Armazena buffs, debuffs e status
+        self.p2_effects = {}
+
+    def get_opponent_id(self, player_id):
+        return self.p2['user_id'] if player_id == self.p1['user_id'] else self.p1['user_id']
+
+    def switch_turn(self):
+        self.turn = self.get_opponent_id(self.turn)
+        if self.turn == self.p1['user_id']:
+            self.turn_count += 1
+
+@bot.group(name="pvp", help="Inicia ou gerencia um duelo PvP.", invoke_without_command=True)
+async def pvp(ctx):
+    await custom_help(ctx, command_name="pvp")
+
+@pvp.command(name="challenge", help="Desafia outro jogador. Uso: !pvp challenge [ranked] <nome>")
+async def pvp_challenge(ctx, *args):
+    if not args:
+        await ctx.send("Uso: `!pvp challenge [ranked] <nome do personagem>`")
+        return
+
+    is_ranked = args[0].lower() == 'ranked'
+    target_name = " ".join(args[1:]) if is_ranked else " ".join(args)
+
+    challenger_id = ctx.author.id
+    challenger_char = database.get_character(challenger_id)
+    if not challenger_char:
+        await ctx.send("Você precisa de um personagem para desafiar alguém.")
+        return
+
+    target_char = database.get_character_by_name(target_name)
+    if not target_char:
+        await ctx.send(f"Personagem '{target_name}' não encontrado.")
+        return
+
+    target_id = target_char['user_id']
+    if target_id == challenger_id:
+        await ctx.send("Você não pode desafiar a si mesmo.")
+        return
+
+    if target_id in pvp_invitations.values() or challenger_id in pvp_invitations:
+        await ctx.send("Um de vocês já tem um desafio pendente.")
+        return
+
+    if target_id in active_pvp_battles or challenger_id in active_pvp_battles:
+        await ctx.send("Um de vocês já está em uma batalha.")
+        return
+
+    pvp_invitations[target_id] = challenger_id
+    pvp_invitations[f"{target_id}_ranked"] = is_ranked # Armazena se é ranqueada
+    
+    await ctx.send(f"⚔️ Desafio {'Ranqueado ' if is_ranked else ''}enviado para **{target_char['name']}**! Ele(a) tem 60 segundos para aceitar.")
+
+    # Envia o convite para o canal privado do jogador desafiado
+    target_channel = bot.get_channel(target_char['channel_id'])
+    if target_channel:
+        await target_channel.send(f"⚔️ <@{target_id}>, você foi desafiado para um duelo {'Ranqueado ' if is_ranked else ''}por **{challenger_char['name']}**! "
+                                  f"Use `!pvp accept {challenger_char['name']}` ou `!pvp decline {challenger_char['name']}` neste canal.")
+    else:
+        # Fallback para DM caso o canal não seja encontrado
+        target_user = await bot.fetch_user(target_id)
+        await target_user.send(f"⚔️ Você foi desafiado para um duelo por **{challenger_char['name']}**! "
+                               f"Use `!pvp accept {challenger_char['name']}` ou `!pvp decline {challenger_char['name']}` no seu canal de RPG.")
+
+    await asyncio.sleep(60)
+    if pvp_invitations.get(target_id) == challenger_id:
+        del pvp_invitations[target_id]
+        if f"{target_id}_ranked" in pvp_invitations: del pvp_invitations[f"{target_id}_ranked"]
+        await ctx.send(f"O desafio para **{target_char['name']}** expirou.")
+
+@pvp.command(name="accept", help="Aceita um desafio de duelo.")
+async def pvp_accept(ctx, *, challenger_name: str):
+    challenged_id = ctx.author.id
+    challenger_char = database.get_character_by_name(challenger_name)
+    if not challenger_char:
+        await ctx.send(f"Personagem '{challenger_name}' não encontrado.")
+        return
+
+    challenger_id = challenger_char['user_id']
+
+    if pvp_invitations.get(challenged_id) != challenger_id:
+        await ctx.send("Você não tem um desafio pendente deste jogador.")
+        return
+
+    is_ranked = pvp_invitations.get(f"{challenged_id}_ranked", False)
+    del pvp_invitations[challenged_id]
+    if f"{challenged_id}_ranked" in pvp_invitations: del pvp_invitations[f"{challenged_id}_ranked"]
+
+    challenged_char = database.get_character(challenged_id)
+
+    # Inicia a batalha
+    battle = PVPBattle(challenger_char, challenged_char, ranked=is_ranked)
+    active_pvp_battles[challenger_id] = battle
+    active_pvp_battles[challenged_id] = battle
+
+    challenger_channel = bot.get_channel(challenger_char['channel_id'])
+    challenged_channel = bot.get_channel(challenged_char['channel_id'])
+
+    await challenger_channel.send(f"**{challenged_char['name']}** aceitou seu desafio! A batalha {'Ranqueada ' if is_ranked else ''}vai começar!")
+    await challenged_channel.send(f"Você aceitou o desafio de **{challenger_char['name']}**! A batalha {'Ranqueada ' if is_ranked else ''}vai começar!")
+
+    # Inicia o loop da batalha
+    await run_pvp_battle(battle)
+
+def _process_effects(battle, player_id):
+    """Processa efeitos de status (como veneno) no início do turno do jogador."""
+    log_entries = []
+    effects = battle.p1_effects if player_id == battle.p1['user_id'] else battle.p2_effects
+    
+    # Dano de Veneno
+    if 'poison' in effects:
+        poison = effects['poison']
+        poison_damage = poison['damage']
+        if player_id == battle.p1['user_id']: battle.p1_hp -= poison_damage
+        else: battle.p2_hp -= poison_damage
+        
+        log_entries.append(f"🤢 **{battle.p1['name'] if player_id == battle.p1['user_id'] else battle.p2['name']}** sofre **{poison_damage}** de dano de veneno.")
+        poison['duration'] -= 1
+        if poison['duration'] <= 0:
+            del effects['poison']
+            log_entries.append(f"O veneno se dissipou.")
+    return log_entries
+
+async def run_pvp_battle(battle):
+    p1_channel = bot.get_channel(battle.p1['channel_id'])
+    p2_channel = bot.get_channel(battle.p2['channel_id'])
+
+    while battle.p1_hp > 0 and battle.p2_hp > 0:
+        current_player_id = battle.turn
+        current_player_char = battle.p1 if current_player_id == battle.p1['user_id'] else battle.p2
+        current_player_channel = p1_channel if current_player_id == battle.p1['user_id'] else p2_channel
+        
+        opponent_char = battle.p2 if current_player_id == battle.p1['user_id'] else battle.p1
+        opponent_channel = p2_channel if current_player_id == battle.p1['user_id'] else p1_channel
+
+        # Processar efeitos de status no início do turno
+        effect_logs = _process_effects(battle, current_player_id)
+        if effect_logs:
+            battle.log.extend(effect_logs)
+            log_embed = discord.Embed(title="Efeitos de Turno", description="\n".join(effect_logs), color=discord.Color.purple())
+            await p1_channel.send(embed=log_embed)
+            await p2_channel.send(embed=log_embed)
+            if battle.p1_hp <= 0 or battle.p2_hp <= 0: break
+
+        await opponent_channel.send(f"Aguardando a ação de **{current_player_char['name']}**...")
+
+        embed = discord.Embed(title=f"Turno {battle.turn_count} - É a sua vez!", description="Escolha sua ação: `atacar`, `habilidade`, `fugir`", color=discord.Color.green())
+        embed.add_field(name=f"Seu HP", value=f"{battle.p1_hp if current_player_id == battle.p1['user_id'] else battle.p2_hp}", inline=True)
+        embed.add_field(name=f"HP de {opponent_char['name']}", value=f"{battle.p2_hp if current_player_id == battle.p1['user_id'] else battle.p1_hp}", inline=True)
+        await current_player_channel.send(embed=embed)
+
+        try:
+            action_msg = await bot.wait_for(
+                "message",
+                check=lambda m: m.author.id == current_player_id and m.channel == current_player_channel and m.content.lower() in ["atacar", "habilidade", "skill", "fugir"],
+                timeout=60.0
+            )
+            action = action_msg.content.lower()
+
+            # Lógica da ação (simplificada, pode ser expandida com a lógica do !hunt)
+            if action == "atacar":
+                attacker_bonuses = battle.p1_bonuses if current_player_id == battle.p1['user_id'] else battle.p2_bonuses
+                defender_bonuses = battle.p2_bonuses if current_player_id == battle.p1['user_id'] else battle.p1_bonuses
+                
+                attacker_effects = battle.p1_effects if current_player_id == battle.p1['user_id'] else battle.p2_effects
+                defender_effects = battle.p2_effects if current_player_id == battle.p1['user_id'] else battle.p1_effects
+
+                # Aplica buffs/debuffs
+                attack_buff = attacker_effects.get('buff_attack', {}).get('value', 0)
+                defense_debuff = defender_effects.get('debuff_defense', {}).get('value', 0)
+                defense_buff = defender_effects.get('buff_defense', {}).get('value', 0)
+
+                attack_stat = current_player_char['strength'] + attacker_bonuses['attack'] + attack_buff
+                defense_stat = opponent_char['constitution'] + defender_bonuses['defense'] + defense_buff - defense_debuff
+
+                if DEBUG_MODE:
+                    print("\n--- CÁLCULO DE DANO (ATAQUE NORMAL) ---")
+                    print(f"Atacante: {current_player_char['name']} | Defensor: {opponent_char['name']}")
+                    print(f"Ataque Total: {attack_stat} = {current_player_char['strength']}(base) + {attacker_bonuses['attack']}(itens) + {attack_buff}(buff)")
+                    print(f"Defesa Total: {defense_stat} = {opponent_char['constitution']}(base) + {defender_bonuses['defense']}(itens) + {defense_buff}(buff) - {defense_debuff}(debuff)")
+
+                damage = max(0, round(attack_stat * random.uniform(0.9, 1.1)) - defense_stat)
+                
+                if current_player_id == battle.p1['user_id']:
+                    battle.p2_hp -= damage
+                else:
+                    battle.p1_hp -= damage
+                
+                if DEBUG_MODE:
+                    print(f"Dano Final: {damage}")
+
+                log_entry = f"**Turno {battle.turn_count}**: ⚔️ **{current_player_char['name']}** ataca **{opponent_char['name']}** e causa **{damage}** de dano!"
+                battle.log.append(log_entry)
+
+            elif action == "habilidade" or action == "skill":
+                skills = database.get_character_skills(current_player_char['class'], current_player_char['level'])
+                if not skills:
+                    battle.log.append(f"**Turno {battle.turn_count}**: ❓ **{current_player_char['name']}** tentou usar uma habilidade, mas não conhece nenhuma e perdeu o turno.")
+                else:
+                    skill_list_str = "\n".join([f"`{idx+1}`: **{s['name']}** (Custo: {s['mp_cost']} MP)" for idx, s in enumerate(skills)])
+                    await current_player_channel.send(f"Qual habilidade você quer usar?\n{skill_list_str}\nDigite o número da habilidade ou `cancelar`.")
+                    
+                    try:
+                        skill_choice_msg = await bot.wait_for(
+                            "message",
+                            check=lambda m: m.author.id == current_player_id and m.channel == current_player_channel,
+                            timeout=30.0
+                        )
+                        if skill_choice_msg.content.lower() == 'cancelar':
+                            battle.log.append(f"**Turno {battle.turn_count}**: ❌ **{current_player_char['name']}** decidiu não usar uma habilidade e perdeu o turno.")
+                        else:
+                            choice_idx = int(skill_choice_msg.content) - 1
+                            if 0 <= choice_idx < len(skills):
+                                skill = skills[choice_idx]
+                                current_mp = battle.p1_mp if current_player_id == battle.p1['user_id'] else battle.p2_mp
+                                
+                                if current_mp < skill['mp_cost']:
+                                    battle.log.append(f"**Turno {battle.turn_count}**: 💧 **{current_player_char['name']}** tentou usar **{skill['name']}**, mas não tinha MP suficiente.")
+                                else:
+                                    # Deduz MP
+                                    if current_player_id == battle.p1['user_id']: battle.p1_mp -= skill['mp_cost']
+                                    else: battle.p2_mp -= skill['mp_cost']
+
+                                    # Lógica de Efeitos
+                                    scaling_stat_value = current_player_char.get(skill['scaling_stat'], 0)
+                                    total_effect_value = round(skill['base_value'] + (scaling_stat_value * skill['scaling_factor']))
+
+                                    if skill['effect_type'] == 'DAMAGE':
+                                        defender_bonuses = battle.p2_bonuses if current_player_id == battle.p1['user_id'] else battle.p1_bonuses
+                                        defense_stat = opponent_char['constitution'] + defender_bonuses['defense']
+                                        if DEBUG_MODE:
+                                            print("\n--- CÁLCULO DE DANO (SKILL DAMAGE) ---")
+                                            print(f"Poder da Skill: {total_effect_value} | Defesa do Alvo: {defense_stat}")
+                                        skill_damage = max(0, total_effect_value - defense_stat)
+                                        
+                                        if current_player_id == battle.p1['user_id']: battle.p2_hp -= skill_damage
+                                        else: battle.p1_hp -= skill_damage
+
+                                        if DEBUG_MODE: print(f"Dano Final da Skill: {skill_damage}")
+                                        battle.log.append(f"**Turno {battle.turn_count}**: ✨ **{current_player_char['name']}** usa **{skill['name']}** e causa **{skill_damage}** de dano em **{opponent_char['name']}**!")
+
+                                    elif skill['effect_type'] == 'DAMAGE_PIERCING':
+                                        defender_bonuses = battle.p2_bonuses if current_player_id == battle.p1['user_id'] else battle.p1_bonuses
+                                        # O poder da skill é o dano, e a penetração é calculada separadamente
+                                        penetration_value = round(skill['base_value'] + ((current_player_char.get(skill['scaling_stat'], 0)*0.25) * skill['scaling_factor']))
+                                        total_defense = opponent_char['constitution'] + defender_bonuses['defense']
+                                        final_defense = max(0, total_defense - penetration_value)
+                                        if DEBUG_MODE:
+                                            print("\n--- CÁLCULO DE DANO (SKILL PIERCING) ---")
+                                            print(f"Poder da Skill: {total_effect_value} | Defesa Original: {total_defense} | Penetração: {penetration_value} | Defesa Final: {final_defense}")
+                                        skill_damage = max(0, total_effect_value - final_defense)
+
+                                        if current_player_id == battle.p1['user_id']: battle.p2_hp -= skill_damage
+                                        else: battle.p1_hp -= skill_damage
+
+                                        battle.log.append(f"**Turno {battle.turn_count}**: ✨ **{current_player_char['name']}** usa **{skill['name']}** e causa **{skill_damage}** de dano em **{opponent_char['name']}**!")
+                                    
+                                    elif skill['effect_type'] == 'HEAL':
+                                        if current_player_id == battle.p1['user_id']:
+                                            battle.p1_hp = min(battle.p1['max_hp'], battle.p1_hp + total_effect_value)
+                                        else:
+                                            battle.p2_hp = min(battle.p2['max_hp'], battle.p2_hp + total_effect_value)
+                                        battle.log.append(f"**Turno {battle.turn_count}**: 💖 **{current_player_char['name']}** usa **{skill['name']}** e se cura em **{total_effect_value}** de HP!")
+
+                                    elif skill['effect_type'] == 'DAMAGE_AND_POISON':
+                                        defender_bonuses = battle.p2_bonuses if current_player_id == battle.p1['user_id'] else battle.p1_bonuses
+                                        defense_stat = opponent_char['constitution'] + defender_bonuses['defense']
+                                        skill_damage = max(0, total_effect_value - defense_stat)
+                                        
+                                        if current_player_id == battle.p1['user_id']: battle.p2_hp -= skill_damage
+                                        else: battle.p1_hp -= skill_damage
+                                        battle.log.append(f"**Turno {battle.turn_count}**: ✨ **{current_player_char['name']}** usa **{skill['name']}** e causa **{skill_damage}** de dano direto...")
+
+                                        # Aplica veneno
+                                        opponent_effects = battle.p2_effects if current_player_id == battle.p1['user_id'] else battle.p1_effects
+                                        opponent_effects['poison'] = {'damage': round(total_effect_value * 0.5), 'duration': skill['effect_duration']}
+                                        battle.log.append(f"**Turno {battle.turn_count}**: 🐍 ...e envenena **{opponent_char['name']}** por {skill['effect_duration']} turnos!")
+
+                                    elif skill['effect_type'] == 'BUFF_ATTACK':
+                                        attacker_effects = battle.p1_effects if current_player_id == battle.p1['user_id'] else battle.p2_effects
+                                        attacker_effects['buff_attack'] = {'value': total_effect_value, 'duration': skill['effect_duration']}
+                                        battle.log.append(f"**Turno {battle.turn_count}**: 💪 **{current_player_char['name']}** usa **{skill['name']}** e aumenta seu ataque por {skill['effect_duration']} turnos!")
+
+                                    elif skill['effect_type'] == 'BUFF_DEFENSE':
+                                        attacker_effects = battle.p1_effects if current_player_id == battle.p1['user_id'] else battle.p2_effects
+                                        attacker_effects['buff_defense'] = {'value': total_effect_value, 'duration': skill['effect_duration']}
+                                        battle.log.append(f"**Turno {battle.turn_count}**: 🛡️ **{current_player_char['name']}** usa **{skill['name']}** e aumenta sua defesa por {skill['effect_duration']} turnos!")
+
+                                    elif skill['effect_type'] == 'DEBUFF_DEFENSE':
+                                        opponent_effects = battle.p2_effects if current_player_id == battle.p1['user_id'] else battle.p1_effects
+                                        opponent_effects['debuff_defense'] = {'value': total_effect_value, 'duration': skill['effect_duration']}
+                                        battle.log.append(f"**Turno {battle.turn_count}**: 📉 **{current_player_char['name']}** usa **{skill['name']}** e reduz a defesa de **{opponent_char['name']}** por {skill['effect_duration']} turnos!")
+
+                                    else:
+                                        battle.log.append(f"**Turno {battle.turn_count}**: 🌀 **{current_player_char['name']}** usa **{skill['name']}**, mas o efeito ainda não foi implementado em PvP.")
+
+                            else:
+                                battle.log.append(f"**Turno {battle.turn_count}**: ❓ **{current_player_char['name']}** fez uma escolha inválida e perdeu o turno.")
+
+                    except (asyncio.TimeoutError, ValueError):
+                        battle.log.append(f"**Turno {battle.turn_count}**: ⏳ **{current_player_char['name']}** demorou para escolher uma habilidade e perdeu o turno.")
+
+            elif action == "fugir":
+                log_entry = f"**Turno {battle.turn_count}**: 🏳️ **{current_player_char['name']}** fugiu do duelo!"
+                battle.log.append(log_entry)
+                if current_player_id == battle.p1['user_id']: battle.p1_hp = 0
+                else: battle.p2_hp = 0
+
+            # Enviar log para ambos os jogadores
+            log_embed = discord.Embed(title="Histórico da Batalha", description="\n".join(battle.log), color=discord.Color.light_grey())
+            await p1_channel.send(embed=log_embed)
+            await p2_channel.send(embed=log_embed)
+
+        except asyncio.TimeoutError:
+            log_entry = f"**Turno {battle.turn_count}**: ⏳ **{current_player_char['name']}** demorou demais para agir e perdeu o turno."
+            battle.log.append(log_entry)
+            log_embed = discord.Embed(title="Histórico da Batalha", description="\n".join(battle.log), color=discord.Color.light_grey())
+            await p1_channel.send(embed=log_embed)
+            await p2_channel.send(embed=log_embed)
+
+        battle.switch_turn()
+
+    # Fim da batalha
+    winner = battle.p1 if battle.p2_hp <= 0 else battle.p2
+    loser = battle.p2 if battle.p2_hp <= 0 else battle.p1
+    
+    final_message = f"🏆 **FIM DO DUELO {'RANQUEADO' if battle.ranked else ''}!** 🏆\nO vencedor é **{winner['name']}**!"
+    await p1_channel.send(final_message)
+    await p2_channel.send(final_message)
+
+    # Atualiza stats de PvP se for ranqueada
+    if battle.ranked:
+        winner_stats = database.get_character(winner['user_id'])
+        loser_stats = database.get_character(loser['user_id'])
+        database.update_character_stats(winner['user_id'], {'pvp_wins': winner_stats['pvp_wins'] + 1})
+        database.update_character_stats(loser['user_id'], {'pvp_losses': loser_stats['pvp_losses'] + 1})
+        await p1_channel.send("As estatísticas ranqueadas foram atualizadas.")
+        await p2_channel.send("As estatísticas ranqueadas foram atualizadas.")
+
+    # Cura ambos os jogadores
+    database.update_character_stats(battle.p1['user_id'], {'hp': battle.p1['max_hp'], 'mp': battle.p1['max_mp']})
+    database.update_character_stats(battle.p2['user_id'], {'hp': battle.p2['max_hp'], 'mp': battle.p2['max_mp']})
+
+    # Limpa o estado da batalha
+    del active_pvp_battles[battle.p1['user_id']]
+    del active_pvp_battles[battle.p2['user_id']]
+
+@bot.command(name="leaderboard", aliases=["ranking", "top"], help="Mostra os rankings do servidor.")
+async def leaderboard(ctx, ranking_type: str = 'level'):
+    if ranking_type.lower() not in ['level', 'pvp']:
+        await ctx.send("Tipo de ranking inválido. Use `level` ou `pvp`.")
+        return
+
+    if ranking_type.lower() == 'level':
+        data = database.get_leaderboard('level')
+        embed = discord.Embed(title="🏆 Placar de Líderes - Nível 🏆", description="Os aventureiros mais experientes do servidor.", color=discord.Color.gold())
+        for i, player in enumerate(data):
+            embed.add_field(name=f"#{i+1} - {player['name']}", value=f"**Nível:** {player['level']} | **XP:** {player['experience']}", inline=False)
+    
+    elif ranking_type.lower() == 'pvp':
+        data = database.get_leaderboard('pvp')
+        embed = discord.Embed(title="⚔️ Placar de Líderes - PvP Ranqueado ⚔️", description="Os duelistas mais temidos do servidor.", color=discord.Color.red())
+        for i, player in enumerate(data):
+            score = player.get('score', 0)
+            embed.add_field(
+                name=f"#{i+1} - {player['name']}", 
+                value=f"**Score:** {score} | **Vitórias:** {player['pvp_wins']} | **Derrotas:** {player['pvp_losses']}", 
+                inline=False
+            )
+
+    await ctx.send(embed=embed)
 
 # --- Executar o Bot ---
 

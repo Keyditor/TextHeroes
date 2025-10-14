@@ -186,7 +186,11 @@ def migrate_db():
     with db_cursor() as cursor:
         # --- Migração 1: Adicionar colunas se não existirem ---
         tables_to_check = {
-            "characters": [("gold", "INTEGER NOT NULL DEFAULT 0")],
+            "characters": [
+                ("gold", "INTEGER NOT NULL DEFAULT 0"),
+                ("pvp_wins", "INTEGER NOT NULL DEFAULT 0"),
+                ("pvp_losses", "INTEGER NOT NULL DEFAULT 0"),
+            ],
             "enemies": [
                 ("gold_reward", "INTEGER NOT NULL DEFAULT 10"),
                 ("image_url", "TEXT")
@@ -261,7 +265,9 @@ def init_db():
             image_url TEXT,
             level INTEGER NOT NULL DEFAULT 1,
             experience INTEGER NOT NULL DEFAULT 0,
-            gold INTEGER NOT NULL DEFAULT 0
+            gold INTEGER NOT NULL DEFAULT 0,
+            pvp_wins INTEGER NOT NULL DEFAULT 0,
+            pvp_losses INTEGER NOT NULL DEFAULT 0
         )
     """)
         cursor.execute("""
@@ -431,6 +437,17 @@ def get_character(user_id):
             return dict(zip(columns, character_data))
     return None
 
+def get_character_by_name(name):
+    """Retorna os dados de um personagem pelo nome (case-insensitive)."""
+    with db_cursor() as cursor:
+        cursor.execute("SELECT * FROM characters WHERE name LIKE ?", (name,))
+        character_data = cursor.fetchone()
+        if character_data:
+            # Retorna um dicionário para facilitar o acesso aos dados
+            columns = [description[0] for description in cursor.description]
+            return dict(zip(columns, character_data))
+    return None
+
 def update_character_image(user_id, image_url):
     """Atualiza a URL da imagem de um personagem."""
     with db_cursor() as cursor:
@@ -481,6 +498,22 @@ def get_random_loot(enemy_level):
             columns = [description[0] for description in cursor.description]
             return dict(zip(columns, loot_data))
     return None
+
+def get_enemies_for_level(player_level):
+    """Busca todos os inimigos para o nível do jogador."""
+    with db_cursor() as cursor:
+        cursor.execute("SELECT * FROM enemies WHERE min_level <= ? AND max_level >= ? ORDER BY min_level", (player_level, player_level))
+        enemy_data = cursor.fetchall()
+        columns = [description[0] for description in cursor.description]
+        return [dict(zip(columns, enemy)) for enemy in enemy_data]
+
+def get_all_huntable_enemies(player_level):
+    """Busca todos os inimigos que o jogador pode caçar especificamente (nível > max_level)."""
+    with db_cursor() as cursor:
+        cursor.execute("SELECT * FROM enemies WHERE max_level < ? ORDER BY min_level", (player_level,))
+        enemy_data = cursor.fetchall()
+        columns = [description[0] for description in cursor.description]
+        return [dict(zip(columns, enemy)) for enemy in enemy_data]
 
 def _add_item_to_inventory(cursor, user_id, item_id, quantity=1, enhancement_level=0):
     """Lógica interna para adicionar um item, reutilizando um cursor existente."""
@@ -612,43 +645,58 @@ def get_equipped_items(user_id):
 
         # Busca por bônus especiais
         special_bonuses = {}
+        duration_bonuses = {}
 
-        for slot, item_id in equipped_dict.items():
-            if item_id and slot != 'character_user_id':
-                cursor.execute("SELECT name, attack_bonus, defense_bonus, effect_type, effect_value FROM loot_table WHERE id = ?", (item_id,))
+        for slot, inventory_id in equipped_dict.items():
+            if inventory_id and slot != 'character_user_id':
+                # Pega os detalhes do item e seu aprimoramento
+                cursor.execute("""
+                    SELECT l.name, l.attack_bonus, l.defense_bonus, l.effect_type, l.effect_value, l.effect_duration, i.enhancement_level
+                    FROM inventory i
+                    JOIN loot_table l ON i.item_id = l.id
+                    WHERE i.id = ?
+                """, (inventory_id,))
                 item_details = cursor.fetchone()
                 if item_details:
-                    name, attack, defense, effect_type, effect_value = item_details
-                    equipped_item_details[slot] = name
-                    total_attack_bonus += attack
-                    total_defense_bonus += defense
+                    name, attack, defense, effect_type, effect_value, effect_duration, enhancement = item_details
+                    
+                    # Calcula o bônus do aprimoramento (15% por nível)
+                    final_attack = round(attack * (1 + 0.15 * enhancement))
+                    final_defense = round(defense * (1 + 0.15 * enhancement))
+
+                    equipped_item_details[slot] = f"{name} +{enhancement}" if enhancement > 0 else name
+                    total_attack_bonus += final_attack
+                    total_defense_bonus += final_defense
 
                     if effect_type:
                         special_bonuses[effect_type] = effect_value
+                        if effect_duration:
+                            duration_bonuses[effect_type] = effect_duration
             else:
                 equipped_item_details[slot] = "Vazio"
         
         bonuses = {
             "attack": total_attack_bonus, 
             "defense": total_defense_bonus,
-            "special": special_bonuses
+            "special": special_bonuses,
+            "duration": duration_bonuses
         }
 
         return equipped_item_details, bonuses
 
-def equip_item(user_id, item_id, slot):
+def equip_item(user_id, inventory_id, slot):
     """Equipa um item em um slot específico, desequipando o anterior se houver."""
     with db_cursor() as cursor:
         # Primeiro, verifica se há um item no slot e o devolve ao inventário
-        cursor.execute(f"SELECT {slot} FROM equipment WHERE character_user_id = ?", (user_id,))
-        current_item_id = cursor.fetchone()[0]
-        if current_item_id:
-            _add_item_to_inventory(cursor, user_id, current_item_id)
+        # Esta lógica foi simplificada, pois o item desequipado já está no inventário.
+        # Apenas precisamos limpar o slot.
 
         # Agora, equipa o novo item
-        cursor.execute(f"UPDATE equipment SET {slot} = ? WHERE character_user_id = ?", (item_id, user_id))
-        # E remove o item do inventário
-        _remove_item_from_inventory(cursor, user_id, item_id)
+        try:
+            cursor.execute(f"UPDATE equipment SET {slot} = ? WHERE character_user_id = ?", (inventory_id, user_id))
+        except sqlite3.Error as e:
+            print(f"Erro ao equipar item: {e}")
+            return False
     return True
 
 def unequip_item(user_id, slot):
@@ -794,6 +842,21 @@ def remove_market_listing(listing_id):
     with db_cursor() as cursor:
         cursor.execute("DELETE FROM market_listings WHERE id = ?", (listing_id,))
         return cursor.rowcount > 0
+
+def get_leaderboard(sort_by='level', limit=10):
+    """Busca dados para o placar de líderes."""
+    with db_cursor() as cursor:
+        if sort_by == 'level':
+            query = "SELECT name, level, experience FROM characters ORDER BY level DESC, experience DESC LIMIT ?"
+        elif sort_by == 'pvp':
+            # Calcula o score como (vitórias - derrotas)
+            query = "SELECT name, pvp_wins, pvp_losses, (pvp_wins - pvp_losses) as score FROM characters ORDER BY score DESC, pvp_wins DESC LIMIT ?"
+        else:
+            return []
+        
+        cursor.execute(query, (limit,))
+        columns = [description[0] for description in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
 if __name__ == "__main__":
