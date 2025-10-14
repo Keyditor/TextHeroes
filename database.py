@@ -460,6 +460,13 @@ def update_character_channel(user_id, channel_id):
         cursor.execute("UPDATE characters SET channel_id = ? WHERE user_id = ?", (channel_id, user_id))
         return cursor.rowcount > 0
 
+def update_character_guild(user_id, new_guild_id, new_channel_id):
+    """Atualiza o guild_id e channel_id de um personagem durante a migração."""
+    with db_cursor() as cursor:
+        cursor.execute("UPDATE characters SET guild_id = ?, channel_id = ? WHERE user_id = ?", (new_guild_id, new_channel_id, user_id))
+        return cursor.rowcount > 0
+
+
 def update_character_stats(user_id, updates):
     """Atualiza múltiplos status de um personagem (level, xp, atributos)."""
     with db_cursor() as cursor:

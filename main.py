@@ -1626,7 +1626,8 @@ async def custom_help(ctx, *, command_name: str = None):
             "Personagem": ["newchar", "char", "skills", "quest", "bestiary", "reset"],
             "Ação": ["hunt", "autohunt", "use", "pvp"],
             "Interação": ["shop", "market"],
-            "Equipamento": ["inventory", "equip", "unequip", "enhance"]
+            "Equipamento": ["inventory", "equip", "unequip", "enhance"],
+            "Outros": ["gm", "leaderboard"]
         }
         for category, cmd_list in categories.items():
             cmd_descriptions = "\n".join([f"`!{bot.get_command(c).name}` - {bot.get_command(c).help}" for c in cmd_list if bot.get_command(c)])
@@ -1947,6 +1948,85 @@ async def reset_character(ctx):
             await general_channel.send(f"🔄 O aventureiro(a) **{char_name}** decidiu recomeçar sua jornada, renascendo como um(a) {char_race} {char_class}!")
     else:
         await ctx.author.send("Ocorreu um erro ao salvar seu novo personagem. Por favor, tente usar `!newchar`.")
+
+@bot.command(name="migrate", help="Move seu personagem para o servidor atual. Deve ser usado no servidor de destino.")
+async def migrate(ctx):
+    user_id = ctx.author.id
+    destination_guild = ctx.guild
+    destination_guild_id = destination_guild.id
+
+    character = database.get_character(user_id)
+
+    if not character:
+        await ctx.send("Você não tem um personagem para migrar.")
+        return
+
+    if character['guild_id'] == destination_guild.id:
+        await ctx.send("Seu personagem já está neste servidor!")
+        return
+
+    # --- Passo de Confirmação ---
+    embed = discord.Embed(
+        title="⚠️ Confirmação de Migração ⚠️",
+        description=(
+            f"Você está prestes a migrar **{character['name']}** para o servidor **'{destination_guild.name}'**.\n"
+            "Seu canal privado atual será apagado e um novo será criado no servidor de destino.\n\n"
+            "Para confirmar, digite `migrar meu personagem`."
+        ),
+        color=discord.Color.orange()
+    )
+    await ctx.send(embed=embed)
+
+    try:
+        confirm_msg = await bot.wait_for(
+            "message",
+            check=lambda m: m.author == ctx.author and m.channel == ctx.channel and m.content.lower() == "migrar meu personagem",
+            timeout=30.0
+        )
+    except asyncio.TimeoutError:
+        await ctx.send("Migração cancelada. Nenhuma alteração foi feita.")
+        return
+
+    # --- Processo de Migração ---
+    await ctx.send(f"Iniciando a migração para **'{destination_guild.name}'**...")
+
+    # 1. Deletar canal antigo
+    if character.get('channel_id'):
+        old_channel = bot.get_channel(character['channel_id'])
+        if old_channel:
+            try:
+                await old_channel.delete(reason=f"Migração do personagem {character['name']}")
+            except discord.Forbidden:
+                await ctx.send("Não foi possível apagar seu canal antigo. A migração continuará, mas peça a um administrador para remover o canal manualmente.")
+
+    # 2. Criar novo canal privado no servidor de destino
+    overwrites = {
+        destination_guild.default_role: discord.PermissionOverwrite(read_messages=False),
+        ctx.author: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+        destination_guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+    }
+    try:
+        private_channel = await destination_guild.create_text_channel(
+            f'rpg-{character["name"].lower().replace(" ", "-")}',
+            overwrites=overwrites,
+            reason=f"Canal RPG migrado para {character['name']}"
+        )
+        new_channel_id = private_channel.id
+    except discord.Forbidden:
+        await ctx.send("Não consegui criar seu novo canal privado no servidor de destino. A migração falhou. Verifique as permissões do bot lá.")
+        return
+
+    # 3. Atualizar o banco de dados
+    if database.update_character_guild(user_id, destination_guild_id, new_channel_id):
+        await ctx.send(f"✅ Migração concluída com sucesso! Seu personagem **{character['name']}** agora pertence ao servidor **'{destination_guild.name}'**.")
+        await private_channel.send(f"Bem-vindo(a) ao seu novo lar, {ctx.author.mention}! Sua aventura continua aqui.")
+
+        # 4. Aviso no chat #geral do novo servidor
+        general_channel = await get_general_channel(destination_guild)
+        if general_channel:
+            await general_channel.send(f"👋 Um(a) aventureiro(a) experiente chegou! **{character['name']}** migrou para este servidor para continuar sua jornada!")
+    else:
+        await ctx.send("Ocorreu um erro ao atualizar os dados do seu personagem no banco de dados. A migração falhou.")
 
 @bot.command(name="gm", help="Mostra os créditos do criador do bot.")
 async def gm_command(ctx):
