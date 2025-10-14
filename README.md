@@ -1,5 +1,4 @@
-
-  ![Logo](https://github.com/Keyditor/TextHeroes/blob/main/token_1.png)
+![Logo](https://github.com/Keyditor/TextHeroes/blob/main/token_1.png)
 
 # TextHeroes ⚔️
 
@@ -58,7 +57,7 @@ Para rodar o TextHeroes no seu próprio servidor, siga estes passos:
 
 ## Comandos do Jogo
 
-Para uma lista completa de todos os comandos disponíveis e como usá-los, por favor, consulte nosso **Guia de Comandos**.
+Para uma lista completa de todos os comandos disponíveis e como usá-los, por favor, consulte nosso [**Guia de Comandos**](https://github.com/Keyditor/TextHeroes/blob/main/COMMANDS.md).
 
 ## Licença e Créditos
 
