@@ -385,6 +385,15 @@ def init_db():
             FOREIGN KEY (quest_id) REFERENCES quests (id)
         )
     """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS guilds (
+            guild_id INTEGER PRIMARY KEY,
+            guild_name TEXT NOT NULL,
+            joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+
 
     # Executa as migrações ANTES de popular os dados
     migrate_db() 
@@ -791,6 +800,29 @@ def complete_quest(user_id, quest_id):
     with db_cursor() as cursor:
         cursor.execute("DELETE FROM player_quests WHERE character_user_id = ? AND quest_id = ?", (user_id, quest_id))
         return cursor.rowcount > 0
+
+def register_guild(guild_id, guild_name):
+    """Registra um novo servidor ou atualiza o nome de um existente."""
+    with db_cursor() as cursor:
+        cursor.execute("""
+            INSERT INTO guilds (guild_id, guild_name) VALUES (?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET guild_name = excluded.guild_name
+        """, (guild_id, guild_name))
+        return cursor.rowcount > 0
+
+def unregister_guild(guild_id):
+    """Remove um servidor do banco de dados."""
+    with db_cursor() as cursor:
+        cursor.execute("DELETE FROM guilds WHERE guild_id = ?", (guild_id,))
+        return cursor.rowcount > 0
+
+def get_all_guilds():
+    """Retorna todos os servidores registrados."""
+    with db_cursor() as cursor:
+        cursor.execute("SELECT guild_id, guild_name FROM guilds")
+        return cursor.fetchall()
+
+# --- Funções do Mercado ---
 
 def get_market_listings(page=1, per_page=10, search_term=None):
     """Busca anúncios no mercado com paginação e pesquisa."""

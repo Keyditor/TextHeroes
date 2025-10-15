@@ -5,6 +5,8 @@ import asyncio
 import random
 from config import DISCORD_BOT_TOKEN, GENERAL_CHANNEL_NAME, OWNER_ID
 import database
+from game_constants import *
+
 
 # --- Configurações do Bot ---
 
@@ -17,54 +19,14 @@ intents.members = True          # Necessário para gerenciar membros e permissõ
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# Importa após a criação do bot para evitar importação circular
+from battle_system import PVEBattle, PVPBattle
+
 # --- Gerenciamento de Estado Global ---
 pvp_invitations = {} # Armazena convites de duelo {desafiado_id: desafiante_id}
 active_pvp_battles = {} # Armazena batalhas ativas {user_id: battle_instance}
+active_pve_battles = {} # Armazena batalhas PVE ativas {user_id: battle_instance}
 DEBUG_MODE = False # Controla a exibição de logs de cálculo no console
-
-# --- Constantes do Jogo ---
-
-RACES = ["Humano", "Elfo", "Anão", "Halfling", "Meio-Orc", "Thiefling"]
-CLASSES = ["Guerreiro", "Ladino", "Feiticeiro", "Bardo", "Clérigo", "Patrulheiro"]
-
-# Detalhes das Raças (Bônus/Ônus de Atributos)
-RACE_MODIFIERS = {
-    "Humano": {"strength": 1, "constitution": 1, "dexterity": 1, "intelligence": 1, "wisdom": 1, "charisma": 1},
-    "Elfo": {"dexterity": 3, "intelligence": 2, "constitution": -1},
-    "Anão": {"constitution": 3, "strength": 2, "dexterity": -1},
-    "Halfling": {"dexterity": 3, "charisma": 2, "strength": -1},
-    "Meio-Orc": {"strength": 3, "constitution": 2, "intelligence": -1},
-    "Thiefling": {"intelligence": 2, "charisma": 3, "wisdom": -1},
-}
-
-# Detalhes das Classes (Atributo Chave)
-CLASS_DETAILS = {
-    "Guerreiro": {"key_attribute": "strength", "type": "physical"},
-    "Ladino": {"key_attribute": "dexterity", "type": "physical"},
-    "Feiticeiro": {"key_attribute": "intelligence", "type": "magical"},
-    "Bardo": {"key_attribute": "charisma", "type": "magical"},
-    "Clérigo": {"key_attribute": "wisdom", "type": "magical"},
-    "Patrulheiro": {"key_attribute": "dexterity", "type": "physical"},
-}
-
-# Mapeamento para o banco de dados
-ATTRIBUTE_MAP_PT_EN = {
-    "força": "strength", "constituição": "constitution", "destreza": "dexterity",
-    "inteligência": "intelligence", "sabedoria": "wisdom", "carisma": "charisma"
-}
-
-ATTRIBUTE_MAP_EN_PT = {v: k.capitalize() for k, v in ATTRIBUTE_MAP_PT_EN.items()}
-
-
-# Pontos para distribuição de atributos (ex: 75 pontos para distribuir entre 6 atributos)
-# D&D 5e geralmente usa um array fixo (15, 14, 13, 12, 10, 8) ou point buy.
-# Para simplificar, vamos usar um sistema de "point buy" onde o jogador distribui um total de pontos.
-TOTAL_ATTRIBUTE_POINTS = 24 # Pontos para distribuir acima do valor mínimo de 8.
-MIN_ATTRIBUTE_VALUE = 8
-MAX_ATTRIBUTE_VALUE = 15
-
-# --- Constantes de Progressão ---
-XP_PER_LEVEL_MULTIPLIER = 100
 
 
 # --- Funções Auxiliares ---
@@ -94,6 +56,13 @@ async def get_general_channel(guild):
 
 # --- Eventos do Bot ---
 
+def sync_guilds():
+    """Sincroniza a lista de servidores do bot com o banco de dados."""
+    print("Sincronizando servidores com o banco de dados...")
+    for guild in bot.guilds:
+        database.register_guild(guild.id, guild.name)
+    print(f"Sincronização concluída. O bot está em {len(bot.guilds)} servidor(es).")
+
 @bot.event
 async def on_ready():
     """Evento disparado quando o bot está online."""
@@ -121,6 +90,20 @@ async def on_ready():
         return
 
     database.init_db() # Garante que o DB está inicializado ao iniciar o bot
+    sync_guilds() # Sincroniza os servidores ao iniciar
+
+@bot.event
+async def on_guild_join(guild):
+    """Evento disparado quando o bot entra em um novo servidor."""
+    print(f"Bot adicionado ao servidor: {guild.name} (ID: {guild.id})")
+    database.register_guild(guild.id, guild.name)
+
+@bot.event
+async def on_guild_remove(guild):
+    """Evento disparado quando o bot é removido de um servidor."""
+    print(f"Bot removido do servidor: {guild.name} (ID: {guild.id})")
+    database.unregister_guild(guild.id)
+
 
 @bot.event
 async def on_command_error(ctx, error):
@@ -408,19 +391,22 @@ async def character_sheet(ctx, subcommand=None, *args):
     embed.set_footer(text=f"ID do Jogador: {character['user_id']}")
     await ctx.send(embed=embed)
 
-@bot.command(name="hunt", aliases=["battle", "explorar"], help="Inicia uma batalha com um inimigo aleatório.")
-async def hunt(ctx, *, enemy_name: str = None):
+async def start_pve_battle(ctx, is_autohunt, enemy_name=None):
+    """Função unificada para iniciar batalhas PVE (hunt e autohunt)."""
     user_id = ctx.author.id
     player = database.get_character(user_id)
-
     if not player:
-        await ctx.send("Você precisa de um personagem para caçar! Use `!newchar`.")
+        await ctx.send(f"Você precisa de um personagem para caçar! Use `!newchar`.")
         return
 
     # Garante que a batalha ocorra no canal privado do jogador
     if ctx.channel.id != player['channel_id']:
         private_channel = bot.get_channel(player['channel_id'])
         await ctx.send(f"As batalhas acontecem no seu canal privado! Vá para {private_channel.mention} e use o comando `!hunt` lá.")
+        return
+
+    if user_id in active_pve_battles or user_id in active_pvp_battles:
+        await ctx.send("Você já está em uma batalha! Conclua-a antes de iniciar outra.")
         return
 
     # --- Lógica de Inimigo Elite ---
@@ -453,337 +439,25 @@ async def hunt(ctx, *, enemy_name: str = None):
         enemy['xp_reward'] = round(enemy['xp_reward'] * 2)
         enemy['gold_reward'] = round(enemy['gold_reward'] * 2)
 
-    player_hp = player['hp']
-    enemy_hp = enemy['hp']
+    # Inicia a batalha
+    battle = PVEBattle(bot, player, enemy, original_enemy_name, is_autohunt, is_elite, active_pve_battles)
+    active_pve_battles[user_id] = battle
 
-    # Pega os bônus de equipamento
-    _, player_bonuses = database.get_equipped_items(user_id)
-    
-    # --- Criação da Ficha de Versus ---
-    versus_embed = discord.Embed(
-        title=f"⚔️ BATALHA IMINENTE ⚔️",
-        description=f"🌲 Você encontra um {enemy['name']}! Prepare-se! 🌲",
-        color=discord.Color.red()
-    )
-    # Stats do Jogador
-    player_total_attack = player['strength'] + player_bonuses['attack']
-    player_total_defense = player['constitution'] + player_bonuses['defense']
-    versus_embed.add_field(name=f"__**{player['name']}**__ (Lvl {player['level']})", value=f"❤️ HP: {player_hp}\n⚔️ Atq: {player_total_attack}\n🛡️ Def: {player_total_defense}", inline=True)
-    # Stats do Inimigo
-    versus_embed.add_field(name=f"__**{enemy['name'].replace('⭐ **ELITE** ', '')}**__ (Lvl {enemy['min_level']}-{enemy['max_level']})", value=f"❤️ HP: {enemy_hp}\n⚔️ Atq: {enemy['attack']}\n🛡️ Def: {enemy['defense']}", inline=True)
-    if player.get('image_url'):
-        versus_embed.set_author(name=player['name'], icon_url=player['image_url'])
-    if enemy.get('image_url'):
-        versus_embed.set_thumbnail(url=enemy['image_url'])
-    
-    await ctx.send(embed=versus_embed)
+    await battle.send_versus_embed(ctx)
 
-    # Loop de batalha
-    player_buffs = {}
-    enemy_debuffs = {}
-    enemy_status_effects = {} # Para efeitos como veneno
-
-    while player_hp > 0 and enemy_hp > 0:
-        # Turno do Jogador
-        embed = discord.Embed(title="Seu Turno!", description="Escolha sua ação: `atacar`, `defender`, `habilidade`, `usar item`, `fugir`", color=discord.Color.green())
-        embed.add_field(name=f"{player['name']} HP", value=f"{player_hp}/{player['max_hp']}", inline=True)
-        embed.add_field(name=f"{player['name']} MP", value=f"{player['mp']}/{player['max_mp']}", inline=True)
-        embed.add_field(name=f"{enemy['name']} HP", value=f"{enemy_hp}/{enemy['hp']}", inline=True)
-        await ctx.send(embed=embed)
-
-        try:
-            action_msg = await bot.wait_for(
-                "message",
-                check=lambda m: m.author == ctx.author and m.channel == ctx.channel and m.content.lower() in ["atacar", "defender", "habilidade", "skill", "usar item", "fugir"],
-                timeout=30.0
-            )
-            action = action_msg.content.lower()
-            if action == "skill": action = "habilidade" # Alias
-        except asyncio.TimeoutError:
-            await ctx.send("Você demorou demais para agir! O inimigo ataca!")
-            action = "passar" # Ação padrão se o tempo esgotar
-
-
-        player_defending = False
-        if action == "atacar":
-            # Dano = (Força do Atacante * Modificador Aleatório) - Defesa do Alvo
-            special_bonuses = player_bonuses.get("special", {})
-            
-            # Usa o atributo chave da classe para ataques físicos
-            class_info = CLASS_DETAILS.get(player['class'])
-            base_attack_stat_name = 'strength' # Padrão
-            if class_info and class_info['type'] == 'physical':
-                base_attack_stat_name = class_info['key_attribute']
-
-            base_attack_stat = player[base_attack_stat_name]
-            player_total_attack = base_attack_stat + player_bonuses['attack']
-            player_damage = max(0, round(player_total_attack * random.uniform(0.8, 1.2)) - enemy['defense'])
-            enemy_hp -= player_damage
-            await ctx.send(f"⚔️ Você ataca o {enemy['name']} e causa **{player_damage}** de dano!")
-
-            # Lógica de Lifesteal
-            lifesteal_percent = special_bonuses.get("LIFESTEAL_PERCENT")
-            if lifesteal_percent and player_damage > 0:
-                life_drained = round(player_damage * (lifesteal_percent / 100))
-                player_hp = min(player['max_hp'], player_hp + life_drained)
-                await ctx.send(f"🩸 Você drena **{life_drained}** de vida do inimigo! (HP: {player_hp})")
-            
-            # Lógica de Veneno ao atacar
-            poison_chance = special_bonuses.get("POISON_ON_HIT")
-            if poison_chance and random.random() < (poison_chance / 100):
-                # O dano do veneno pode ser uma fração do ataque do jogador
-                poison_damage = round((player['dexterity'] + player_bonuses['attack']) * 0.25) 
-                # A duração vem do item
-                poison_duration = player_bonuses.get("duration", {}).get("POISON_ON_HIT", 3)
-                enemy_status_effects['poison'] = {'damage': poison_damage, 'duration': poison_duration}
-                await ctx.send(f"🐍 Sua arma envenenou o {enemy['name']}!")
-        elif action == "defender":
-            player_defending = True
-            await ctx.send("🛡️ Você se prepara para o próximo ataque, aumentando sua defesa!")
-        elif action == "habilidade":
-            skills = database.get_character_skills(player['class'], player['level'])
-            if not skills:
-                await ctx.send("Você ainda não aprendeu nenhuma habilidade! Você perde seu turno.")
-                action = "passar"
-            else:
-                skill_list_str = "\n".join([f"`{idx+1}`: **{s['name']}** (Custo: {s['mp_cost']} MP) - {s['description']}" for idx, s in enumerate(skills)])
-                await ctx.send(f"Qual habilidade você quer usar?\n{skill_list_str}\nDigite o número da habilidade ou `cancelar`.")
-
-                try:
-                    skill_choice_msg = await bot.wait_for(
-                        "message",
-                        check=lambda m: m.author == ctx.author and m.channel == ctx.channel,
-                        timeout=30.0
-                    )
-                    if skill_choice_msg.content.lower() == 'cancelar':
-                        await ctx.send("Uso de habilidade cancelado. Você perde seu turno.")
-                        action = "passar"
-                    else:
-                        choice_idx = int(skill_choice_msg.content) - 1
-                        if 0 <= choice_idx < len(skills):
-                            skill = skills[choice_idx]
-                            if player['mp'] < skill['mp_cost']:
-                                await ctx.send(f"Você não tem MP suficiente para usar **{skill['name']}**! Você perde seu turno.")
-                                action = "passar"
-                            else:
-                                # Deduz MP e aplica o efeito
-                                player['mp'] -= skill['mp_cost']
-                                database.update_character_stats(user_id, {'mp': player['mp']})
-                                await ctx.send(f"Você usou **{skill['name']}**!")
-
-                                # Lógica de Efeitos
-                                scaling_stat_value = player.get(skill['scaling_stat'], 0)
-                                total_effect_value = round(skill['base_value'] + (scaling_stat_value * skill['scaling_factor']))
-
-                                if skill['effect_type'] == 'DAMAGE':
-                                    skill_damage = max(0, total_effect_value - enemy['defense'])
-                                    enemy_hp -= skill_damage
-                                    await ctx.send(f"✨ A habilidade causa **{skill_damage}** de dano ao {enemy['name']}!")
-                                
-                                elif skill['effect_type'] == 'DAMAGE_PIERCING':
-                                    # Ignora metade da defesa do inimigo
-                                    skill_damage = max(0, total_effect_value - (enemy['defense'] // 2))
-                                    enemy_hp -= skill_damage
-                                    await ctx.send(f"🎯 O ataque perfurante causa **{skill_damage}** de dano ao {enemy['name']}!")
-                                
-                                elif skill['effect_type'] == 'DAMAGE_AND_POISON':
-                                    # Dano inicial
-                                    skill_damage = max(0, total_effect_value - enemy['defense'])
-                                    enemy_hp -= skill_damage
-                                    await ctx.send(f"✨ A habilidade causa **{skill_damage}** de dano direto...")
-                                    # Aplica veneno
-                                    enemy_status_effects['poison'] = {'damage': round(total_effect_value * 0.5), 'duration': skill['effect_duration']}
-                                    await ctx.send(f"🐍 ...e envenena o {enemy['name']} por {skill['effect_duration']} turnos!")
-
-                                elif skill['effect_type'] == 'HEAL':
-                                    player_hp = min(player['max_hp'], player_hp + total_effect_value)
-                                    await ctx.send(f"💖 Você se cura em **{total_effect_value}** de HP! HP atual: {player_hp}")
-
-                                elif skill['effect_type'] == 'BUFF_ATTACK':
-                                    player_buffs['attack'] = total_effect_value
-                                    await ctx.send(f"💪 Sua fúria aumenta seu ataque em **{total_effect_value}** no próximo turno!")
-
-                                elif skill['effect_type'] == 'BUFF_DEFENSE':
-                                    player_buffs['defense'] = total_effect_value
-                                    await ctx.send(f"🛡️ Uma barreira mágica aumenta sua defesa em **{total_effect_value}** no próximo turno!")
-
-                                elif skill['effect_type'] == 'DEBUFF_DEFENSE':
-                                    enemy_debuffs['defense'] = total_effect_value
-                                    await ctx.send(f"📉 A defesa do inimigo foi reduzida em **{total_effect_value}** no próximo turno!")
-
-                        else:
-                            await ctx.send("Escolha inválida. Você perde seu turno.")
-                            action = "passar"
-                except (asyncio.TimeoutError, ValueError):
-                    await ctx.send("Tempo esgotado ou escolha inválida. Você perde seu turno.")
-                    action = "passar"
-
-        elif action == "usar item":
-            inventory = database.get_inventory(user_id)
-            consumables = [item for item in inventory if item[4] == 'potion'] # item[4] é item_type
-
-            if not consumables:
-                await ctx.send("Você não tem itens consumíveis para usar! Você perde seu turno.")
-                action = "passar" # Pula o turno
-            else:
-                item_list_str = "\n".join([f"`{idx+1}`: {item[2]}" for idx, item in enumerate(consumables)])
-                await ctx.send(f"Qual item você quer usar?\n{item_list_str}\nDigite o número do item ou `cancelar`.")
-                
-                try:
-                    item_choice_msg = await bot.wait_for(
-                        "message",
-                        check=lambda m: m.author == ctx.author and m.channel == ctx.channel,
-                        timeout=30.0
-                    )
-                    if item_choice_msg.content.lower() == 'cancelar':
-                        await ctx.send("Uso de item cancelado. Você perde seu turno.")
-                        action = "passar"
-                    else:
-                        choice_idx = int(item_choice_msg.content) - 1
-                        if 0 <= choice_idx < len(consumables):
-                            item_to_use = consumables[choice_idx]
-                            item_id, _, item_name, _, _, effect_type, effect_value, _ = item_to_use
-
-                            if effect_type == 'HEAL_HP':
-                                player_hp = min(player['max_hp'], player_hp + effect_value)
-                                await ctx.send(f"Você usou **{item_name}** e recuperou **{effect_value}** de HP! HP atual: {player_hp}")
-                                database.remove_item_from_inventory(user_id, item_id, 1)
-                            else:
-                                await ctx.send(f"O item **{item_name}** não pode ser usado em batalha. Você perde seu turno.")
-                                action = "passar"
-                        else:
-                            await ctx.send("Escolha inválida. Você perde seu turno.")
-                            action = "passar"
-                except (asyncio.TimeoutError, ValueError):
-                    await ctx.send("Tempo esgotado ou escolha inválida. Você perde seu turno.")
-                    action = "passar"
-            
-            if action == "passar": # Se o uso do item falhou, o inimigo ainda ataca
-                pass
-        elif action == "fugir":
-            # Chance de fuga baseada na Destreza
-            flee_chance = player['dexterity'] / 20 # Ex: 15 DEX = 75% de chance
-            if random.random() < flee_chance:
-                await ctx.send("🏃 Você conseguiu fugir da batalha!")
-                return # Encerra a função de caça
-            else:
-                await ctx.send("A tentativa de fuga falhou! Você perde seu turno.")
-
-        if enemy_hp <= 0:
-            break # Inimigo derrotado, sai do loop
-
-        # Processar efeitos de status no inimigo (ex: veneno)
-        if 'poison' in enemy_status_effects:
-            poison = enemy_status_effects['poison']
-            poison_damage = poison['damage']
-            enemy_hp -= poison_damage
-            poison['duration'] -= 1
-            await ctx.send(f"🤢 O {enemy['name']} sofre **{poison_damage}** de dano de veneno. (Duração: {poison['duration']} turnos)")
-            if poison['duration'] <= 0:
-                del enemy_status_effects['poison']
-                await ctx.send(f"O veneno no {enemy['name']} se dissipou.")
-        
-        if enemy_hp <= 0:
-            break # Inimigo derrotado pelo veneno
-
-
-        # Turno do Inimigo
-        await asyncio.sleep(1) # Pausa para dar ritmo
-        
-        # Aplica buffs e debuffs
-        final_player_attack = player_bonuses['attack'] + player_buffs.get('attack', 0)
-        final_player_defense = player_bonuses['defense'] + player_buffs.get('defense', 0)
-        final_enemy_defense = enemy['defense'] - enemy_debuffs.get('defense', 0)
-
-        player_total_defense = final_player_defense + (player['dexterity'] // 4) # Bônus de equipamento + destreza
-        if player_defending:
-            player_total_defense += player['dexterity'] // 2 # Bônus maior ao defender
-
-        enemy_damage = max(0, round(enemy['attack'] * random.uniform(0.8, 1.2)) - player_total_defense) # Inimigo não se beneficia de buffs de ataque por enquanto
-        player_hp -= enemy_damage
-        await ctx.send(f"💥 O {enemy['name']} ataca e causa **{enemy_damage}** de dano em você!")
-
-        # Resetar buffs/debuffs de um turno no final do turno completo
-        player_buffs = {}
-        enemy_debuffs = {}
-
-    # Fim da batalha
-    await asyncio.sleep(1)
-    if player_hp <= 0:
-        await ctx.send(f"☠️ Você foi derrotado pelo {enemy['name']}... Sua jornada termina aqui (por enquanto).")
-        # Penalidade: restaurar HP para 1, sem ganhar XP.
-        database.update_character_stats(user_id, {"hp": 1})
+    if is_autohunt:
+        await battle.run_autohunt_loop(ctx)
     else:
-        await ctx.send(f"🏆 **VITÓRIA!** Você derrotou o {enemy['name']}! 🏆")
+        await battle.run_manual_loop(ctx)
 
-        # Ganho de XP
-        new_experience = player['experience'] + enemy['xp_reward']
-        new_gold = player['gold'] + enemy['gold_reward']
-        xp_to_next_level = player['level'] * XP_PER_LEVEL_MULTIPLIER
+@bot.command(name="hunt", aliases=["battle", "explorar"], help="Inicia uma batalha com um inimigo aleatório.")
+async def hunt(ctx, *, enemy_name: str = None):
+    await start_pve_battle(ctx, is_autohunt=False, enemy_name=enemy_name)
 
-        # Aplica bônus de anéis
-        special_bonuses = player_bonuses.get("special", {})
+@bot.command(name="autohunt", aliases=["afk"], help="Inicia uma batalha automática para farm de XP e itens.")
+async def autohunt(ctx, *, enemy_name: str = None):
+    await start_pve_battle(ctx, is_autohunt=True, enemy_name=enemy_name)
 
-        await ctx.send(f"Você ganhou **{enemy['xp_reward']}** de experiência e **{enemy['gold_reward']}** moedas de ouro!")
-
-        updates = {"experience": new_experience, "hp": player_hp, "gold": new_gold} # Salva o HP atual e ouro
-
-        # Lógica de Level Up
-        if new_experience >= xp_to_next_level:
-            updates['level'] = player['level'] + 1
-            updates['experience'] = new_experience - xp_to_next_level
-            
-            await ctx.send(f"🎉 **LEVEL UP!** Você alcançou o nível **{updates['level']}**! 🎉")
-
-            attr_map = {"força": "strength", "constituição": "constitution", "destreza": "dexterity", "inteligência": "intelligence", "sabedoria": "wisdom", "carisma": "charisma"}
-            
-            if updates['level'] % 5 == 0:
-                # A cada 5 níveis, o jogador distribui 4 pontos
-                points_to_distribute = 4
-                await ctx.send(f"Você tem **{points_to_distribute}** pontos para distribuir entre seus atributos: `força`, `constituição`, `destreza`, `inteligência`, `sabedoria`, `carisma`.")
-                
-                for i in range(points_to_distribute):
-                    await ctx.send(f"Ponto {i+1}/{points_to_distribute}: Qual atributo você quer aumentar?")
-                    try:
-                        attr_choice_msg = await bot.wait_for(
-                            "message",
-                            check=lambda m: m.author == ctx.author and m.channel == ctx.channel and m.content.lower() in attr_map.keys(),
-                            timeout=60.0
-                        )
-                        attr_to_increase = attr_choice_msg.content.lower()
-                        db_attr = attr_map[attr_to_increase]
-                        
-                        # Aumenta o atributo no dicionário de updates
-                        current_value = updates.get(db_attr, player[db_attr])
-                        updates[db_attr] = current_value + 1
-                        await ctx.send(f"Seu atributo **{attr_to_increase.capitalize()}** aumentou para **{updates[db_attr]}**!")
-
-                    except asyncio.TimeoutError:
-                        await ctx.send("Tempo esgotado. O ponto de atributo foi perdido.")
-
-            # Aumenta HP/MP máximo no level up
-            # Usa 'updates.get' para pegar o valor atualizado de constituição, se foi alterado
-            new_constitution = updates.get('constitution', player['constitution'])
-            new_intelligence = updates.get('intelligence', player['intelligence'])
-            updates['max_hp'] = player['max_hp'] + 10 + (new_constitution // 4)
-            updates['max_mp'] = player['max_mp'] + 5 + (new_intelligence // 4)
-            updates['hp'] = updates['max_hp'] # Restaura HP e MP no level up
-            updates['mp'] = updates['max_mp']
-
-        database.update_character_stats(user_id, updates)
-
-        # Lógica de Loot
-        loot_rolls = 2 if is_elite else 1 # 2 rolagens de loot para Elites
-        loot_chance = 0.3 # 30% de chance por rolagem
-        
-        for _ in range(loot_rolls):
-            if random.random() > loot_chance:
-                continue
-
-            loot_item = database.get_random_loot(player['level'])
-            if loot_item:
-                database.add_item_to_inventory(user_id, loot_item['id'])
-                await ctx.send(f"🎁 Você encontrou um item: **{loot_item['name']}**! Ele foi adicionado ao seu inventário (`!inventory`).")
 
 @bot.command(name="inventory", aliases=["inv"], help="Mostra os itens no seu inventário.")
 async def inventory(ctx):
@@ -1429,176 +1103,6 @@ async def show_skills(ctx):
     embed.set_footer(text="O poder das habilidades aumenta com seus atributos.")
     await ctx.send(embed=embed)
 
-@bot.command(name="autohunt", aliases=["afk"], help="Inicia uma batalha automática para farm de XP e itens.")
-async def autohunt(ctx, *, enemy_name: str = None):
-    user_id = ctx.author.id
-    player = database.get_character(user_id)
-
-    if not player:
-        await ctx.send("Você precisa de um personagem para caçar! Use `!newchar`.")
-        return
-
-    if ctx.channel.id != player['channel_id']:
-        private_channel = bot.get_channel(player['channel_id'])
-        await ctx.send(f"As batalhas acontecem no seu canal privado! Vá para {private_channel.mention} e use o comando `!autohunt` lá.")
-        return
-
-    # --- Lógica de Inimigo Elite ---
-    is_elite = random.random() < 0.1 # 10% de chance de ser Elite
-    elite_prefix = ""
-
-    if enemy_name:
-        enemy = database.get_enemy_by_name(enemy_name)
-        if enemy and player['level'] <= enemy['max_level']:
-            await ctx.send(f"Você ainda não superou o poder de **{enemy['name']}**. Para caçá-lo diretamente, seu nível deve ser maior que {enemy['max_level']}.")
-            return
-    else:
-        enemy = database.get_random_enemy(player['level'])
-
-    if not enemy:
-        if enemy_name:
-            await ctx.send(f"Inimigo '{enemy_name}' não encontrado.")
-        else:
-            await ctx.send("Nenhum inimigo encontrado para o seu nível. O mundo parece seguro... por enquanto.")
-        return
-
-    original_enemy_name = enemy['name'] # Salva o nome original para a quest
-
-    if is_elite and not enemy_name: # Elites só aparecem em caçadas aleatórias
-        elite_prefix = "⭐ **ELITE** "
-        enemy['name'] = f"{elite_prefix}{enemy['name']}"
-        enemy['hp'] = round(enemy['hp'] * 1.75)
-        enemy['attack'] = round(enemy['attack'] * 1.75)
-        enemy['defense'] = round(enemy['defense'] * 1.75)
-        enemy['xp_reward'] = round(enemy['xp_reward'] * 2)
-        enemy['gold_reward'] = round(enemy['gold_reward'] * 2)
-
-    player_hp = player['hp']
-    enemy_hp = enemy['hp']
-    _, player_bonuses = database.get_equipped_items(user_id)
-
-    # --- Criação da Ficha de Versus ---
-    versus_embed = discord.Embed(
-        title=f"⚔️ CAÇADA AUTOMÁTICA ⚔️",
-        description=f"🌲 Iniciando caçada contra um {enemy['name']}! 🌲",
-        color=discord.Color.dark_orange()
-    )
-    # Stats do Jogador
-    player_total_attack = player['strength'] + player_bonuses['attack']
-    player_total_defense = player['constitution'] + player_bonuses['defense']
-    versus_embed.add_field(name=f"__**{player['name']}**__ (Lvl {player['level']})", value=f"❤️ HP: {player_hp}\n⚔️ Atq: {player_total_attack}\n🛡️ Def: {player_total_defense}", inline=True)
-    # Stats do Inimigo
-    versus_embed.add_field(name=f"__**{enemy['name'].replace('⭐ **ELITE** ', '')}**__ (Lvl {enemy['min_level']}-{enemy['max_level']})", value=f"❤️ HP: {enemy_hp}\n⚔️ Atq: {enemy['attack']}\n🛡️ Def: {enemy['defense']}", inline=True)
-    if player.get('image_url'):
-        versus_embed.set_author(name=player['name'], icon_url=player['image_url'])
-    if enemy.get('image_url'):
-        versus_embed.set_thumbnail(url=enemy['image_url'])
-    
-    await ctx.send(embed=versus_embed)
-
-    battle_log = []
-    turn = 1
-
-    # Loop de batalha automático
-    while player_hp > 0 and enemy_hp > 0:
-        # Turno do Jogador (sempre ataca)
-        special_bonuses = player_bonuses.get("special", {})
-
-        # Usa o atributo chave da classe para ataques físicos
-        class_info = CLASS_DETAILS.get(player['class'])
-        base_attack_stat_name = 'strength' # Padrão
-        if class_info and class_info['type'] == 'physical':
-            base_attack_stat_name = class_info['key_attribute']
-
-        base_attack_stat = player[base_attack_stat_name]
-        player_total_attack = base_attack_stat + player_bonuses['attack']
-        player_damage = max(0, round(player_total_attack * random.uniform(0.8, 1.2)) - enemy['defense'])
-        enemy_hp -= player_damage
-        battle_log.append(f"Turno {turn}: ⚔️ Você ataca o {enemy['name']} e causa **{player_damage}** de dano. (Inimigo HP: {max(0, enemy_hp)})")
-
-        # Lógica de Lifesteal
-        lifesteal_percent = special_bonuses.get("LIFESTEAL_PERCENT")
-        if lifesteal_percent and player_damage > 0:
-            life_drained = round(player_damage * (lifesteal_percent / 100))
-            player_hp = min(player['max_hp'], player_hp + life_drained)
-            battle_log.append(f"Turno {turn}: 🩸 Você drena **{life_drained}** de vida do inimigo! (Seu HP: {max(0, player_hp)})")
-
-        if enemy_hp <= 0:
-            break
-
-        # Turno do Inimigo
-        player_total_defense = player_bonuses['defense'] + (player['dexterity'] // 4)
-        enemy_damage = max(0, round(enemy['attack'] * random.uniform(0.8, 1.2)) - player_total_defense)
-        player_hp -= enemy_damage
-        battle_log.append(f"Turno {turn}: 💥 O {enemy['name']} ataca e causa **{enemy_damage}** de dano. (Seu HP: {max(0, player_hp)})")
-        turn += 1
-
-    # Envia o log da batalha
-    log_message = "\n".join(battle_log)
-    embed = discord.Embed(title=f"Resumo da Batalha: {player['name']} vs {enemy['name']}", description=log_message, color=discord.Color.orange())
-    await ctx.send(embed=embed)
-    await asyncio.sleep(1)
-
-    # Fim da batalha
-    if player_hp <= 0:
-        await ctx.send(f"☠️ **DERROTA!** Você foi derrotado pelo {enemy['name']}.")
-        database.update_character_stats(user_id, {"hp": 1})
-    else:
-        result_embed = discord.Embed(title="🏆 **VITÓRIA!** 🏆", description=f"Você derrotou o {enemy['name']}!", color=discord.Color.green())
-
-        # Ganho de XP e Moedas
-        new_experience = player['experience'] + enemy['xp_reward']
-        new_gold = player['gold'] + enemy['gold_reward']
-        xp_to_next_level = player['level'] * XP_PER_LEVEL_MULTIPLIER
-        
-        result_embed.add_field(name="Recompensas", value=f"**{enemy['xp_reward']}** de XP\n**{enemy['gold_reward']}** de Ouro", inline=False)
-
-        updates = {"experience": new_experience, "hp": player_hp, "gold": new_gold}
-
-        # Lógica de Level Up (simplificada para auto-hunt)
-        if new_experience >= xp_to_next_level:
-            updates['level'] = player['level'] + 1
-            updates['experience'] = new_experience - xp_to_next_level
-
-            level_up_msg = f"🎉 **LEVEL UP!** Você alcançou o nível **{updates['level']}**!\n"
-            if updates['level'] % 5 == 0:
-                level_up_msg += "Você ganhou pontos de atributo para distribuir! Use o comando `!hunt` para subir de nível e distribuí-los."
-
-            # Aumenta HP/MP máximo no level up
-            new_constitution = updates.get('constitution', player['constitution'])
-            new_intelligence = updates.get('intelligence', player['intelligence'])
-            updates['max_hp'] = player['max_hp'] + 10 + (new_constitution // 4)
-            updates['max_mp'] = player['max_mp'] + 5 + (new_intelligence // 4)
-            updates['hp'] = updates['max_hp'] # Restaura HP e MP no level up
-            updates['mp'] = updates['max_mp']
-
-            result_embed.add_field(name="Level Up!", value=level_up_msg + "\nSeus HP e MP foram restaurados e aumentados!", inline=False)
-
-        database.update_character_stats(user_id, updates)
-
-        # Lógica de Loot
-        loot_rolls = 2 if is_elite else 1 # 2 rolagens de loot para Elites
-        loot_chance = 0.3 # 30% de chance por rolagem
-        loot_message = "Nenhum item encontrado."
-        
-        for i in range(loot_rolls):
-            if random.random() > loot_chance:
-                continue
-            loot_item = database.get_random_loot(player['level'])
-            if loot_item:
-                database.add_item_to_inventory(user_id, loot_item['id'])
-                loot_message = f"🎁 Você encontrou: **{loot_item['name']}**!" if i == 0 else loot_message + f"\n🎁 E também: **{loot_item['name']}**!"
-
-        result_embed.add_field(name="Loot", value=loot_message, inline=False)
-        
-        # Recupera os dados atualizados para mostrar no rodapé
-        updated_player = database.get_character(user_id)
-        result_embed.set_footer(text=f"HP Final: {player_hp}/{updated_player['max_hp']} | XP: {updated_player['experience']}/{updated_player['level'] * XP_PER_LEVEL_MULTIPLIER}")
-
-        await ctx.send(embed=result_embed)
-
-        # Atualiza o progresso da missão, se houver
-        database.update_quest_progress(user_id, 'kill', original_enemy_name)
 
 # --- Comandos de Ajuda ---
 bot.remove_command('help') # Remove o comando de ajuda padrão
@@ -2061,31 +1565,6 @@ async def debug_mode_error(ctx, error):
         await ctx.send("Apenas o proprietário do bot pode usar este comando.")
 
 # --- Sistema de PvP ---
-
-class PVPBattle:
-    def __init__(self, p1_char, p2_char, ranked=False):
-        self.p1 = p1_char
-        self.p2 = p2_char
-        self.p1_hp = p1_char['max_hp']
-        self.p2_hp = p2_char['max_hp']
-        self.p1_mp = p1_char['max_mp']
-        self.p2_mp = p2_char['max_mp']
-        self.ranked = ranked
-        _, self.p1_bonuses = database.get_equipped_items(p1_char['user_id'])
-        _, self.p2_bonuses = database.get_equipped_items(p2_char['user_id'])
-        self.turn = p1_char['user_id'] # p1 começa
-        self.log = []
-        self.turn_count = 1
-        self.p1_effects = {} # Armazena buffs, debuffs e status
-        self.p2_effects = {}
-
-    def get_opponent_id(self, player_id):
-        return self.p2['user_id'] if player_id == self.p1['user_id'] else self.p1['user_id']
-
-    def switch_turn(self):
-        self.turn = self.get_opponent_id(self.turn)
-        if self.turn == self.p1['user_id']:
-            self.turn_count += 1
 
 @bot.group(name="pvp", help="Inicia ou gerencia um duelo PvP.", invoke_without_command=True)
 async def pvp(ctx):
