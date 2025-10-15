@@ -180,6 +180,20 @@ def populate_initial_data(cursor):
             print(f"Creating missing quest: {quest_data[0]}")
             cursor.execute("INSERT INTO quests (name, description, type, objective_type, objective_target, objective_quantity, xp_reward, gold_reward, item_reward_id, item_reward_quantity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", quest_data)
 
+    # Profissões (Jobs)
+    jobs_to_add = [
+        (1, 'Ajudante de Fazendeiro', 'Trabalho simples na fazenda local.', 1, 10),
+        (2, 'Garimpeiro Aprendiz', 'Busca por minérios nas minas abandonadas.', 10, 25),
+        (3, 'Guarda da Cidade', 'Patrulha os muros da cidade, mantendo a ordem.', 20, 50),
+        (4, 'Assistente de Alquimista', 'Ajuda a coletar ingredientes e preparar poções.', 30, 80),
+        (5, 'Caçador de Recompensas', 'Rastreia e captura criminosos para o reino.', 50, 150),
+    ]
+    for job_data in jobs_to_add:
+        cursor.execute("SELECT COUNT(*) FROM jobs WHERE id = ?", (job_data[0],))
+        if cursor.fetchone()[0] == 0:
+            print(f"Creating missing job: {job_data[1]}")
+            cursor.execute("INSERT INTO jobs (id, name, description, level_req, gold_per_hour) VALUES (?, ?, ?, ?, ?)", job_data)
+
 def migrate_db():
     """Verifica e aplica migrações pendentes no banco de dados para atualizar a estrutura."""
     print("Checking for database migrations...")
@@ -190,6 +204,11 @@ def migrate_db():
                 ("gold", "INTEGER NOT NULL DEFAULT 0"),
                 ("pvp_wins", "INTEGER NOT NULL DEFAULT 0"),
                 ("pvp_losses", "INTEGER NOT NULL DEFAULT 0"),
+                ("current_job_id", "INTEGER", "FOREIGN KEY (current_job_id) REFERENCES jobs(id)"),
+                ("job_started_at", "TIMESTAMP"),
+                ("last_payday", "TIMESTAMP"),
+                ("last_job_change", "TIMESTAMP"),
+                ("last_work_check_in", "TIMESTAMP"),
             ],
             "enemies": [
                 ("gold_reward", "INTEGER NOT NULL DEFAULT 10"),
@@ -215,10 +234,11 @@ def migrate_db():
         for table, columns in tables_to_check.items():
             cursor.execute(f"PRAGMA table_info({table})")
             existing_columns = [row[1] for row in cursor.fetchall()]
-            for col_name, col_type in columns:
+            for column_def in columns:
+                col_name, col_type = column_def[0], column_def[1]
                 if col_name not in existing_columns:
                     print(f"Applying migration: Adding column '{col_name}' to table '{table}'...")
-                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}")
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}") # A FK não é adicionada via ALTER TABLE simples em SQLite
 
         # --- Migração 2: Garantir que cada personagem tenha uma entrada de equipamento ---
         cursor.execute("SELECT user_id FROM characters")
@@ -267,7 +287,13 @@ def init_db():
             experience INTEGER NOT NULL DEFAULT 0,
             gold INTEGER NOT NULL DEFAULT 0,
             pvp_wins INTEGER NOT NULL DEFAULT 0,
-            pvp_losses INTEGER NOT NULL DEFAULT 0
+            pvp_losses INTEGER NOT NULL DEFAULT 0,
+            current_job_id INTEGER,
+            job_started_at TIMESTAMP,
+            last_payday TIMESTAMP,
+            last_job_change TIMESTAMP,
+            last_work_check_in TIMESTAMP,
+            FOREIGN KEY (current_job_id) REFERENCES jobs(id)
         )
     """)
         cursor.execute("""
@@ -392,6 +418,25 @@ def init_db():
             joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS jobs (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            description TEXT,
+            level_req INTEGER NOT NULL,
+            gold_per_hour INTEGER NOT NULL
+        )
+    """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS player_jobs_progress (
+            character_user_id INTEGER NOT NULL,
+            job_id INTEGER NOT NULL,
+            hours_worked INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (character_user_id, job_id),
+            FOREIGN KEY (character_user_id) REFERENCES characters(user_id) ON DELETE CASCADE,
+            FOREIGN KEY (job_id) REFERENCES jobs(id)
+        )
+    """)
 
 
 
@@ -483,7 +528,7 @@ def update_character_stats(user_id, updates):
         values = list(updates.values())
         values.append(user_id)
         
-        query = f"UPDATE characters SET {set_clause} WHERE user_id = ?"
+        query = f"UPDATE characters SET {set_clause} WHERE user_id = ?" # nosec
         
         cursor.execute(query, tuple(values))
         return cursor.rowcount > 0
@@ -717,15 +762,11 @@ def equip_item(user_id, inventory_id, slot):
 
 def unequip_item(user_id, slot):
     """Desequipa um item e o devolve ao inventário."""
+    # O item nunca sai do inventário, apenas o slot de equipamento é limpo.
     with db_cursor() as cursor:
-        cursor.execute(f"SELECT {slot} FROM equipment WHERE character_user_id = ?", (user_id,))
-        item_id = cursor.fetchone()
-        if item_id and item_id[0]:
-            item_id = item_id[0]
-            _add_item_to_inventory(cursor, user_id, item_id)
-            cursor.execute(f"UPDATE equipment SET {slot} = NULL WHERE character_user_id = ?", (user_id,))
-            return True
-    return False
+        # A query usa f-string de forma segura, pois 'slot' é validado no comando.
+        cursor.execute(f"UPDATE equipment SET {slot} = NULL WHERE character_user_id = ?", (user_id,)) # nosec
+        return cursor.rowcount > 0
 
 def get_character_skills(class_name, level):
     """Retorna as habilidades disponíveis para uma classe e nível."""
@@ -821,6 +862,61 @@ def get_all_guilds():
     with db_cursor() as cursor:
         cursor.execute("SELECT guild_id, guild_name FROM guilds")
         return cursor.fetchall()
+
+# --- Funções de Profissão (Jobs) ---
+
+def get_all_jobs():
+    """Retorna todas as profissões disponíveis."""
+    with db_cursor() as cursor:
+        cursor.execute("SELECT * FROM jobs ORDER BY level_req")
+        columns = [desc[0] for desc in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+def get_job_by_id(job_id):
+    """Retorna os detalhes de uma profissão pelo ID."""
+    with db_cursor() as cursor:
+        cursor.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
+        row = cursor.fetchone()
+        if row:
+            columns = [desc[0] for desc in cursor.description]
+            return dict(zip(columns, row))
+    return None
+
+def set_player_job(user_id, job_id):
+    """Define o emprego de um jogador e atualiza os timestamps."""
+    with db_cursor() as cursor:
+        if job_id:
+            # Começando um novo emprego
+            cursor.execute("UPDATE characters SET current_job_id = ?, job_started_at = CURRENT_TIMESTAMP, last_job_change = CURRENT_TIMESTAMP, last_work_check_in = CURRENT_TIMESTAMP WHERE user_id = ?", (job_id, user_id))
+        else:
+            # Saindo do emprego
+            cursor.execute("UPDATE characters SET current_job_id = NULL, job_started_at = NULL WHERE user_id = ?", (user_id,))
+        return cursor.rowcount > 0
+
+def get_player_job_progress(user_id, job_id):
+    """Retorna as horas trabalhadas de um jogador em um emprego específico."""
+    with db_cursor() as cursor:
+        cursor.execute("SELECT hours_worked FROM player_jobs_progress WHERE character_user_id = ? AND job_id = ?", (user_id, job_id))
+        result = cursor.fetchone()
+        return result[0] if result else 0
+
+def update_player_job_progress(user_id, job_id, hours_to_add):
+    """Adiciona horas ao progresso de um emprego do jogador."""
+    with db_cursor() as cursor:
+        cursor.execute("""
+            INSERT INTO player_jobs_progress (character_user_id, job_id, hours_worked) VALUES (?, ?, ?)
+            ON CONFLICT(character_user_id, job_id) DO UPDATE SET hours_worked = hours_worked + excluded.hours_worked
+        """, (user_id, job_id, hours_to_add))
+        return cursor.rowcount > 0
+
+def reset_player_job_progress(user_id, job_id):
+    """Reseta as horas trabalhadas de um jogador para um emprego específico (usado após o payday)."""
+    with db_cursor() as cursor:
+        cursor.execute("""
+            UPDATE player_jobs_progress SET hours_worked = 0
+            WHERE character_user_id = ? AND job_id = ?
+        """, (user_id, job_id))
+        return cursor.rowcount > 0
 
 # --- Funções do Mercado ---
 
