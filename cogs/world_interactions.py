@@ -153,8 +153,21 @@ class WorldInteractions(commands.Cog):
         
         hours_to_credit = min(time_since_check_in.total_seconds() / 3600, 3)
 
-        if hours_to_credit < (1/60):
-            await ctx.send("Você acabou de bater o ponto. Volte mais tarde para acumular mais tempo.")
+        if hours_to_credit < (1/60): # Não credita menos de 1 minuto
+            next_available_time = last_check_in + timedelta(minutes=1)
+            time_remaining = next_available_time - datetime.now()
+            
+            # Formata o tempo restante em horas, minutos e segundos
+            seconds = int(time_remaining.total_seconds())
+            minutes, seconds = divmod(seconds, 60)
+            hours, minutes = divmod(minutes, 60)
+
+            time_parts = []
+            if hours > 0: time_parts.append(f"{hours}h")
+            if minutes > 0: time_parts.append(f"{minutes}m")
+            if seconds > 0 or not time_parts: time_parts.append(f"{seconds}s")
+            
+            await ctx.send(f"Você acabou de bater o ponto. Tente novamente em **{' '.join(time_parts)}** (às {next_available_time.strftime('%H:%M:%S')}).")
             return
 
         database.update_player_job_progress(user_id, player['current_job_id'], hours_to_credit)
@@ -200,11 +213,20 @@ class WorldInteractions(commands.Cog):
         accumulated_hours = database.get_player_job_progress(user_id, job_info['id'])
         pending_payment = int(accumulated_hours * job_info['gold_per_hour'])
 
-        embed = discord.Embed(title=f"💼 Status de Emprego - {player['name']} 💼", color=discord.Color.green())
+        embed = discord.Embed(
+            title=f"💼 Ficha de Profissão - {player['name']} 💼", 
+            description=(
+                "Use `!work` a cada 3 horas para 'bater o ponto' e acumular suas horas de trabalho. "
+                "Se você não usar o comando, o tempo para de contar após 3 horas.\n\n"
+                "Use `!payday` uma vez por dia para coletar todo o ouro acumulado."
+            ),
+            color=discord.Color.green()
+        )
         embed.add_field(name="Profissão Atual", value=job_info['name'], inline=False)
         embed.add_field(name="Horas Acumuladas", value=f"⏳ {accumulated_hours:.2f} horas", inline=True)
         embed.add_field(name="Pagamento Pendente", value=f"💰 **{pending_payment}** Ouro", inline=True)
-        embed.set_footer(text="Use `!work` a cada 3h para acumular horas e `!payday` para coletar seu pagamento (uma vez por dia).")
+        embed.add_field(name="Salário", value=f"🪙 {job_info['gold_per_hour']} Ouro/hora", inline=True)
+        embed.set_footer(text="Comandos: !job list | !job select <ID> | !job quit")
         await ctx.send(embed=embed)
 
     @job.command(name="select", help="Escolhe um novo emprego. Uso: !job select <ID>")
