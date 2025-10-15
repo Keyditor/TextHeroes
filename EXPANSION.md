@@ -85,3 +85,16 @@ Esta tabela contém todas as missões disponíveis no jogo.
 | `item_reward_id`| `INTEGER` | O `id` de um item da `loot_table` a ser dado como recompensa. Deixe `NULL` se não houver. | `2` |
 | `item_reward_quantity`| `INTEGER` | A quantidade do item de recompensa a ser dado. | `3` |
 
+---
+
+## 5. Tabela `jobs` (Profissões)
+
+Esta tabela define as profissões que os jogadores podem escolher para ganhar ouro passivamente.
+
+| Coluna | Tipo | Descrição Detalhada | Exemplo |
+| :--- | :--- | :--- | :--- |
+| `id` | `INTEGER` | ID único da profissão. | `1` |
+| `name` | `TEXT` | Nome da profissão. | `Ajudante de Fazendeiro` |
+| `description`| `TEXT` | Descrição curta da profissão. | `Trabalho simples na fazenda local.` |
+| `level_req` | `INTEGER` | O nível mínimo que o personagem precisa ter para escolher esta profissão. | `1` |
+| `gold_per_hour`| `INTEGER` | A quantidade de ouro que o jogador ganha por hora trabalhada. | `10` |

@@ -16,6 +16,7 @@ Este projeto foi criado com a intenção de ser um ponto de partida para desenvo
 *   **Aprimoramento de Equipamentos**: Melhore seus equipamentos até +13 usando gemas especiais.
 *   **Economia**: Lojas para compra/venda e um mercado completo entre jogadores.
 *   **Missões**: Sistema de quests diárias e semanais com recompensas variadas.
+*   **Sistema de Profissões**: Escolha um emprego, trabalhe passivamente e colete seu salário para ganhar ouro.
 
 ## Expansão de Conteúdo
 
