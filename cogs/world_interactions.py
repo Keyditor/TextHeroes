@@ -173,6 +173,9 @@ class WorldInteractions(commands.Cog):
         database.update_player_job_progress(user_id, player['current_job_id'], hours_to_credit)
         database.update_character_stats(user_id, {'last_work_check_in': datetime.now().isoformat()})
 
+        # Atualiza o progresso da missão de trabalho
+        database.update_quest_progress(user_id, 'work', 'hours', hours_to_credit)
+
         await ctx.send(f"✅ Ponto batido! Você acumulou mais **{hours_to_credit:.2f}** horas de trabalho. Continue usando `!work` a cada 3 horas para não perder o progresso.")
 
     @commands.group(name="job", aliases=["emprego", "profissao"], help="Gerencia sua profissão para ganhar ouro passivamente.", invoke_without_command=True)

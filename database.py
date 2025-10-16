@@ -81,6 +81,12 @@ def populate_initial_data(cursor):
         ('Tarrasque', 100, 100, 25000, 900, 500, 75000, 35000, 'https://i.imgur.com/sC3a3fT.png'),
         ('Deus Antigo Adormecido', 100, 100, 20000, 1200, 450, 100000, 50000, 'https://i.imgur.com/Gv1s5sW.png'),
     ]
+    # Chefes de Masmorra
+    # name, hp, attack, defense, xp_reward, gold_reward, image_url
+    boss_enemies_to_add = [
+        ('Rei Goblin', 1500, 50, 30, 1000, 500, 'https://i.imgur.com/M8G9zEE.png'),
+        ('Senhor da Cripta', 4000, 120, 60, 3500, 1500, 'https://i.imgur.com/y5J8IZh.png'),
+    ]
     for enemy_data in enemies_to_add:
         cursor.execute("SELECT COUNT(*) FROM enemies WHERE name = ?", (enemy_data[0],))
         if cursor.fetchone()[0] == 0:
@@ -89,10 +95,18 @@ def populate_initial_data(cursor):
                 "INSERT INTO enemies (name, min_level, max_level, hp, attack, defense, xp_reward, gold_reward, image_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 enemy_data
             )
+    for boss_data in boss_enemies_to_add:
+        cursor.execute("SELECT COUNT(*) FROM boss_enemies WHERE name = ?", (boss_data[0],))
+        if cursor.fetchone()[0] == 0:
+            print(f"Creating missing boss enemy: {boss_data[0]}")
+            cursor.execute(
+                "INSERT INTO boss_enemies (name, hp, attack, defense, xp_reward, gold_reward, image_url) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                boss_data
+            )
 
     # Itens de Loot
     loot_to_add = [
-        # name, description, item_type, rarity, min_level_drop, effect_type, effect_value, value, equip_slot, attack_bonus, defense_bonus
+        # name, description, item_type, rarity, min_level_drop, effect_type, effect_value, value, equip_slot, attack_bonus, defense_bonus, effect_duration, boss_drop_id
         ('Poção de Cura Pequena', 'Restaura 25 HP.', 'potion', 'common', 1, 'HEAL_HP', 25, 10, None, 0, 0, None),
         ('Poção de Cura Média', 'Restaura 75 HP.', 'potion', 'uncommon', 5, 'HEAL_HP', 75, 50, None, 0, 0, None),
         ('Poção de Mana Pequena', 'Restaura 20 MP.', 'potion', 'common', 2, 'HEAL_MP', 20, 15, None, 0, 0, None),
@@ -125,13 +139,18 @@ def populate_initial_data(cursor):
         ('Gema de Arma', 'Uma gema necessária para aprimorar armas.', 'material', 'rare', 10, None, None, 1000, None, 0, 0, None),
         ('Gema de Armadura', 'Uma gema necessária para aprimorar armaduras.', 'material', 'rare', 10, None, None, 1000, None, 0, 0, None),
         ('Gema de Acessório', 'Uma gema rara usada para aprimorar anéis e outros acessórios.', 'material', 'epic', 20, None, None, 2500, None, 0, 0, None),
+
+        # Loots de Chefe
+        ('Coroa do Rei Goblin', 'Uma coroa tosca, mas um troféu de valor.', 'armor', 'rare', 5, None, None, 500, 'helmet', 1, 5, None, 1), # Drop do Rei Goblin (ID 1)
+        ('Clava do Rei Goblin', 'Uma clava pesada e brutal.', 'weapon', 'rare', 5, None, None, 600, 'right_hand', 12, 0, None, 1), # Drop do Rei Goblin (ID 1)
+        ('Manto do Senhor da Cripta', 'Um manto sombrio que pulsa com energia necrótica.', 'armor', 'epic', 15, 'MP_REGEN_FLAT', 3, 2000, 'chest', 0, 8, None, 2), # Drop do Senhor da Cripta (ID 2)
     ]
     for item_data in loot_to_add:
         cursor.execute("SELECT COUNT(*) FROM loot_table WHERE name = ?", (item_data[0],))
         if cursor.fetchone()[0] == 0:
             print(f"Creating missing item: {item_data[0]}")
             cursor.execute(
-                "INSERT INTO loot_table (name, description, item_type, rarity, min_level_drop, effect_type, effect_value, value, equip_slot, attack_bonus, defense_bonus, effect_duration) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO loot_table (name, description, item_type, rarity, min_level_drop, effect_type, effect_value, value, equip_slot, attack_bonus, defense_bonus, effect_duration, boss_drop_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 item_data
             )
     
@@ -173,6 +192,7 @@ def populate_initial_data(cursor):
         ('Extermínio de Lobos', 'Cace 10 Lobos que ameaçam os viajantes.', 'daily', 'kill', 'Lobo', 10, 80, 40, None, None),
         ('A Ameaça Orc', 'Derrote 15 Orcs Batedores para proteger a vila.', 'weekly', 'kill', 'Orc Batedor', 15, 250, 150, 1, 1), # Recompensa: Poção de Cura Pequena
         ('Limpeza de Cripta', 'Destrua 20 Esqueletos em uma cripta antiga.', 'weekly', 'kill', 'Esqueleto', 20, 300, 200, 2, 1), # Recompensa: Poção de Cura Média
+        ('Dia de Trabalho Duro', 'Acumule 9 horas de trabalho em sua profissão.', 'daily', 'work', 'hours', 9, 100, 250, 26, 1), # Recompensa: Gema de Arma
     ]
     for quest_data in quests_to_add:
         cursor.execute("SELECT COUNT(*) FROM quests WHERE name = ?", (quest_data[0],))
@@ -193,6 +213,17 @@ def populate_initial_data(cursor):
         if cursor.fetchone()[0] == 0:
             print(f"Creating missing job: {job_data[1]}")
             cursor.execute("INSERT INTO jobs (id, name, description, level_req, gold_per_hour) VALUES (?, ?, ?, ?, ?)", job_data)
+
+    # Masmorras (Dungeons)
+    dungeons_to_add = [
+        (1, 'Caverna dos Goblins', 'Uma caverna infestada de goblins e seu rei.', 5, 1),
+        (2, 'Cripta Assombrada', 'Uma antiga cripta cheia de mortos-vivos e seu mestre.', 15, 2),
+    ]
+    for dungeon_data in dungeons_to_add:
+        cursor.execute("SELECT COUNT(*) FROM dungeons WHERE id = ?", (dungeon_data[0],))
+        if cursor.fetchone()[0] == 0:
+            print(f"Creating missing dungeon: {dungeon_data[1]}")
+            cursor.execute("INSERT INTO dungeons (id, name, description, level_req, boss_id) VALUES (?, ?, ?, ?, ?)", dungeon_data)
 
 def migrate_db():
     """Verifica e aplica migrações pendentes no banco de dados para atualizar a estrutura."""
@@ -222,6 +253,7 @@ def migrate_db():
                 ("attack_bonus", "INTEGER NOT NULL DEFAULT 0"),
                 ("defense_bonus", "INTEGER NOT NULL DEFAULT 0"),
                 ("effect_duration", "INTEGER"),
+                ("boss_drop_id", "INTEGER"),
             ],
             "inventory": [
                 ("unique_id", "TEXT"), # Adicionado para rastrear itens individualmente
@@ -324,7 +356,8 @@ def init_db():
             equip_slot TEXT,
             attack_bonus INTEGER NOT NULL DEFAULT 0,
             defense_bonus INTEGER NOT NULL DEFAULT 0,
-            effect_duration INTEGER
+            effect_duration INTEGER,
+            boss_drop_id INTEGER, FOREIGN KEY (boss_drop_id) REFERENCES boss_enemies(id)
         )
     """)
         cursor.execute("""
@@ -437,6 +470,53 @@ def init_db():
             FOREIGN KEY (job_id) REFERENCES jobs(id)
         )
     """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS boss_enemies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            hp INTEGER NOT NULL,
+            attack INTEGER NOT NULL,
+            defense INTEGER NOT NULL,
+            xp_reward INTEGER NOT NULL,
+            gold_reward INTEGER NOT NULL,
+            image_url TEXT
+        )
+    """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS dungeons (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            description TEXT,
+            level_req INTEGER NOT NULL,
+            boss_id INTEGER NOT NULL,
+            FOREIGN KEY (boss_id) REFERENCES boss_enemies(id)
+        )
+    """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS parties (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            leader_id INTEGER NOT NULL UNIQUE,
+            FOREIGN KEY (leader_id) REFERENCES characters(user_id) ON DELETE CASCADE
+        )
+    """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS party_members (
+            party_id INTEGER NOT NULL,
+            character_user_id INTEGER NOT NULL UNIQUE,
+            PRIMARY KEY (party_id, character_user_id),
+            FOREIGN KEY (party_id) REFERENCES parties(id) ON DELETE CASCADE,
+            FOREIGN KEY (character_user_id) REFERENCES characters(user_id) ON DELETE CASCADE
+        )
+    """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS server_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+    """)
+        # Garante que as chaves de reset existam
+        cursor.execute("INSERT OR IGNORE INTO server_state (key, value) VALUES ('last_daily_reset', '2000-01-01')")
+        cursor.execute("INSERT OR IGNORE INTO server_state (key, value) VALUES ('last_weekly_reset', '2000-01-01')")
 
 
 
@@ -569,12 +649,22 @@ def get_enemies_for_level(player_level):
         return [dict(zip(columns, enemy)) for enemy in enemy_data]
 
 def get_all_huntable_enemies(player_level):
-    """Busca todos os inimigos que o jogador pode caçar especificamente (nível > max_level)."""
+    """Busca todos os inimigos que o jogador pode caçar especificamente (nível do jogador > max_level do inimigo)."""
     with db_cursor() as cursor:
         cursor.execute("SELECT * FROM enemies WHERE max_level < ? ORDER BY min_level", (player_level,))
         enemy_data = cursor.fetchall()
         columns = [description[0] for description in cursor.description]
         return [dict(zip(columns, enemy)) for enemy in enemy_data]
+
+def get_enemy_by_name(enemy_name):
+    """Busca um inimigo pelo nome (case-insensitive)."""
+    with db_cursor() as cursor:
+        cursor.execute("SELECT * FROM enemies WHERE name LIKE ?", (enemy_name,))
+        enemy_data = cursor.fetchone()
+        if enemy_data:
+            columns = [description[0] for description in cursor.description]
+            return dict(zip(columns, enemy_data))
+    return None
 
 def _add_item_to_inventory(cursor, user_id, item_id, quantity=1, enhancement_level=0):
     """Lógica interna para adicionar um item, reutilizando um cursor existente."""
@@ -783,14 +873,15 @@ def get_character_skills(class_name, level):
 
 def get_available_quests(user_id, quest_type):
     """Retorna missões disponíveis (diárias/semanais) que o jogador ainda não aceitou."""
+    limit = 2 # Sorteia 2 missões de cada tipo
     with db_cursor() as cursor:
         cursor.execute("""
             SELECT * FROM quests q
             WHERE q.type = ? AND NOT EXISTS (
                 SELECT 1 FROM player_quests pq 
                 WHERE pq.character_user_id = ? AND pq.quest_id = q.id
-            )
-        """, (quest_type, user_id))
+            ) ORDER BY RANDOM() LIMIT ?
+        """, (quest_type, user_id, limit))
         quests_data = cursor.fetchall()
         columns = [description[0] for description in cursor.description]
         return [dict(zip(columns, quest)) for quest in quests_data]
@@ -824,23 +915,45 @@ def accept_quest(user_id, quest_id):
         cursor.execute("INSERT INTO player_quests (character_user_id, quest_id) VALUES (?, ?)", (user_id, quest_id))
         return cursor.rowcount > 0
 
-def update_quest_progress(user_id, objective_type, target_name):
+def update_quest_progress(user_id, objective_type, target_name, quantity=1):
     """Atualiza o progresso de uma missão ativa."""
     with db_cursor() as cursor:
         # Encontra a missão ativa correspondente
         cursor.execute("""
             UPDATE player_quests 
-            SET progress = progress + 1
+            SET progress = progress + ?
             WHERE character_user_id = ? AND quest_id IN (
                 SELECT id FROM quests WHERE objective_type = ? AND objective_target = ?
             )
-        """, (user_id, objective_type, target_name))
+        """, (quantity, user_id, objective_type, target_name))
 
 def complete_quest(user_id, quest_id):
     """Remove uma missão da lista de ativas do jogador."""
     with db_cursor() as cursor:
         cursor.execute("DELETE FROM player_quests WHERE character_user_id = ? AND quest_id = ?", (user_id, quest_id))
         return cursor.rowcount > 0
+
+def get_server_state(key):
+    """Busca um valor de estado do servidor."""
+    with db_cursor() as cursor:
+        cursor.execute("SELECT value FROM server_state WHERE key = ?", (key,))
+        result = cursor.fetchone()
+        return result[0] if result else None
+
+def set_server_state(key, value):
+    """Define um valor de estado do servidor."""
+    with db_cursor() as cursor:
+        cursor.execute("INSERT OR REPLACE INTO server_state (key, value) VALUES (?, ?)", (key, value))
+
+def reset_player_quests_by_type(quest_type):
+    """Remove o progresso de todas as missões de um certo tipo para todos os jogadores."""
+    with db_cursor() as cursor:
+        cursor.execute("""
+            DELETE FROM player_quests
+            WHERE quest_id IN (SELECT id FROM quests WHERE type = ?)
+        """, (quest_type,))
+        print(f"Progresso de todas as missões do tipo '{quest_type}' foi resetado para todos os jogadores.")
+        return cursor.rowcount
 
 def register_guild(guild_id, guild_name):
     """Registra um novo servidor ou atualiza o nome de um existente."""
@@ -992,6 +1105,114 @@ def get_leaderboard(sort_by='level', limit=10):
         cursor.execute(query, (limit,))
         columns = [description[0] for description in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+# --- Funções de Grupo (Party) ---
+
+def create_party(leader_id):
+    """Cria um novo grupo e adiciona o líder."""
+    with db_cursor() as cursor:
+        try:
+            cursor.execute("INSERT INTO parties (leader_id) VALUES (?)", (leader_id,))
+            party_id = cursor.lastrowid
+            cursor.execute("INSERT INTO party_members (party_id, character_user_id) VALUES (?, ?)", (party_id, leader_id))
+            return party_id
+        except sqlite3.IntegrityError:
+            return None # Jogador já está em um grupo ou já é líder de outro
+
+def get_party_by_member(user_id):
+    """Encontra o grupo de um jogador."""
+    with db_cursor() as cursor:
+        cursor.execute("SELECT party_id FROM party_members WHERE character_user_id = ?", (user_id,))
+        result = cursor.fetchone()
+        return result[0] if result else None
+
+def get_party_by_leader(leader_id):
+    """Encontra um grupo pelo ID do líder."""
+    with db_cursor() as cursor:
+        cursor.execute("SELECT id FROM parties WHERE leader_id = ?", (leader_id,))
+        result = cursor.fetchone()
+        return result[0] if result else None
+
+def get_party_details(party_id):
+    """Retorna os detalhes de um grupo, incluindo o líder e os membros."""
+    with db_cursor() as cursor:
+        cursor.execute("SELECT leader_id FROM parties WHERE id = ?", (party_id,))
+        leader_result = cursor.fetchone()
+        if not leader_result: return None
+
+        cursor.execute("""
+            SELECT c.user_id, c.name, c.level
+            FROM party_members pm
+            JOIN characters c ON pm.character_user_id = c.user_id
+            WHERE pm.party_id = ?
+        """, (party_id,))
+        members = cursor.fetchall()
+        
+        columns = [desc[0] for desc in cursor.description]
+        member_list = [dict(zip(columns, row)) for row in members]
+
+        return {"id": party_id, "leader_id": leader_result[0], "members": member_list}
+
+def add_member_to_party(party_id, user_id):
+    """Adiciona um jogador a um grupo."""
+    with db_cursor() as cursor:
+        try:
+            cursor.execute("INSERT INTO party_members (party_id, character_user_id) VALUES (?, ?)", (party_id, user_id))
+            return cursor.rowcount > 0
+        except sqlite3.IntegrityError:
+            return False # Jogador já está em um grupo
+
+def remove_member_from_party(user_id):
+    """Remove um jogador de qualquer grupo em que esteja."""
+    with db_cursor() as cursor:
+        cursor.execute("DELETE FROM party_members WHERE character_user_id = ?", (user_id,))
+        return cursor.rowcount > 0
+
+def disband_party(party_id):
+    """Remove um grupo e todos os seus membros."""
+    with db_cursor() as cursor:
+        # A remoção em cascata (ON DELETE CASCADE) cuidará dos party_members
+        cursor.execute("DELETE FROM parties WHERE id = ?", (party_id,))
+        return cursor.rowcount > 0
+
+# --- Funções de Masmorra (Dungeon) ---
+
+def get_all_dungeons():
+    """Retorna todas as masmorras disponíveis."""
+    with db_cursor() as cursor:
+        cursor.execute("SELECT * FROM dungeons ORDER BY level_req")
+        columns = [desc[0] for desc in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+def get_dungeon_by_name(name):
+    """Busca uma masmorra pelo nome."""
+    with db_cursor() as cursor:
+        cursor.execute("SELECT * FROM dungeons WHERE name LIKE ?", (f'%{name}%',))
+        dungeon_data = cursor.fetchone()
+        if dungeon_data:
+            columns = [description[0] for description in cursor.description]
+            return dict(zip(columns, dungeon_data))
+    return None
+
+def get_boss_by_id(boss_id):
+    """Busca um chefe pelo ID."""
+    with db_cursor() as cursor:
+        cursor.execute("SELECT * FROM boss_enemies WHERE id = ?", (boss_id,))
+        boss_data = cursor.fetchone()
+        if boss_data:
+            columns = [description[0] for description in cursor.description]
+            return dict(zip(columns, boss_data))
+    return None
+
+def get_boss_loot(boss_id):
+    """Busca todos os itens de loot associados a um chefe."""
+    with db_cursor() as cursor:
+        cursor.execute("SELECT * FROM loot_table WHERE boss_drop_id = ?", (boss_id,))
+        loot_data = cursor.fetchall()
+        if loot_data:
+            columns = [description[0] for description in cursor.description]
+            return [dict(zip(columns, loot)) for loot in loot_data]
+    return []
 
 
 if __name__ == "__main__":

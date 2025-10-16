@@ -1,6 +1,6 @@
 import discord
-from discord.ext import commands
-import os
+from discord.ext import commands, tasks
+import os, sys
 import asyncio
 
 from datetime import datetime, timedelta
@@ -18,7 +18,9 @@ intents = discord.Intents.default()
 intents.reactions = True
 intents.message_content = True  # Necessário para ler o conteúdo das mensagens
 intents.members = True          # Necessário para gerenciar membros e permissões de canal
+intents.guilds = True           # Necessário para a tarefa de reset de missões
 
+# Adiciona um prefixo dinâmico para evitar conflitos
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # Importa após a criação do bot para evitar importação circular
@@ -26,8 +28,12 @@ from battle_system import PVEBattle, PVPBattle
 
 # --- Gerenciamento de Estado Global ---
 bot.pvp_invitations = {} # Armazena convites de duelo {desafiado_id: desafiante_id}
+bot.party_invitations = {} # Armazena convites de grupo {convidado_id: lider_id}
 bot.active_pvp_battles = {} # Armazena batalhas ativas {user_id: battle_instance}
 bot.active_pve_battles = {} # Armazena batalhas PVE ativas {user_id: battle_instance}
+bot.active_dungeons = {} # Armazena masmorras ativas {user_id: dungeon_instance}
+bot.dungeon_queues = {} # Armazena as filas para masmorras {dungeon_name: [user_id]}
+bot.dungeon_match_prompts = {} # Armazena os "pronto-check" {match_id: {players: {user_id: status}}}
 bot.debug_mode = False # Controla a exibição de logs de cálculo no console
 
 async def get_general_channel(guild):
@@ -75,6 +81,7 @@ async def on_ready():
     database.init_db() # Garante que o DB está inicializado ao iniciar o bot
     sync_guilds() # Sincroniza os servidores ao iniciar
     await load_cogs() # Carrega todos os cogs
+    quest_reset_task.start() # Inicia a tarefa de reset de missões
 
 async def load_cogs():
     """Carrega todos os cogs da pasta /cogs."""
@@ -95,6 +102,44 @@ async def on_guild_remove(guild):
     print(f"Bot removido do servidor: {guild.name} (ID: {guild.id})")
     database.unregister_guild(guild.id)
 
+# --- Tarefas em Segundo Plano (Tasks) ---
+
+@tasks.loop(hours=1)
+async def quest_reset_task():
+    """Verifica e reinicia as missões diárias e semanais."""
+    now = datetime.utcnow()
+    today_str = now.strftime('%Y-%m-%d')
+    
+    # --- Reset Diário ---
+    last_daily_reset_str = database.get_server_state('last_daily_reset')
+    if last_daily_reset_str < today_str:
+        print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Iniciando reset de missões diárias...")
+        database.reset_player_quests_by_type('daily')
+        database.set_server_state('last_daily_reset', today_str)
+        print("Reset de missões diárias concluído.")
+        
+        # Notifica o canal geral de cada servidor
+        for guild in bot.guilds:
+            general_channel = await get_general_channel(guild)
+            if general_channel:
+                try:
+                    await general_channel.send("☀️ **Novas missões diárias estão disponíveis!** Use `!quest list` para vê-las.")
+                except discord.Forbidden:
+                    print(f"Não foi possível enviar a mensagem de reset no servidor '{guild.name}'.")
+
+    # --- Reset Semanal (Toda Segunda-feira) ---
+    last_weekly_reset_str = database.get_server_state('last_weekly_reset')
+    last_weekly_reset_date = datetime.strptime(last_weekly_reset_str, '%Y-%m-%d')
+    
+    # Se hoje é segunda (weekday==0) e o último reset foi antes desta semana
+    if now.weekday() == 0 and (now - last_weekly_reset_date).days >= 7:
+        print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Iniciando reset de missões semanais...")
+        database.reset_player_quests_by_type('weekly')
+        database.set_server_state('last_weekly_reset', today_str)
+        print("Reset de missões semanais concluído.")
+        # Você pode adicionar uma notificação para o reset semanal aqui também se desejar.
+
+
 
 @bot.event
 async def on_command_error(ctx, error):
@@ -108,4 +153,7 @@ async def on_command_error(ctx, error):
 # --- Executar o Bot ---
 
 if __name__ == "__main__":
-    asyncio.run(bot.run(DISCORD_BOT_TOKEN))
+    try:
+        asyncio.run(bot.run(DISCORD_BOT_TOKEN))
+    except discord.errors.LoginFailure:
+        print("ERRO: Token do bot inválido. Verifique o arquivo 'config.py'.")
