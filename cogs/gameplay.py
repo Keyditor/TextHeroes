@@ -178,13 +178,27 @@ class Gameplay(commands.Cog):
             return
         
         quest_info = database.get_quest_by_id(quest_id)
+        _, bonuses = database.get_equipped_items(user_id)
+
+        base_xp_reward = quest_info['xp_reward']
+        base_gold_reward = quest_info['gold_reward']
+
+        xp_bonus_percent = bonuses.get("special", {}).get("XP_BONUS_PERCENT", 0)
+        gold_bonus_percent = bonuses.get("special", {}).get("GOLD_BONUS_PERCENT", 0)
+
+        bonus_xp = round(base_xp_reward * (xp_bonus_percent / 100))
+        bonus_gold = round(base_gold_reward * (gold_bonus_percent / 100))
+
+        final_xp_reward = base_xp_reward + bonus_xp
+        final_gold_reward = base_gold_reward + bonus_gold
+
         updates = {
-            'experience': player['experience'] + quest_info['xp_reward'],
-            'gold': player['gold'] + quest_info['gold_reward']
+            'experience': player['experience'] + final_xp_reward,
+            'gold': player['gold'] + final_gold_reward
         }
 
         reward_message = f"🎉 Missão **'{quest_info['name']}'** completa!\n"
-        reward_message += f"Você recebeu **{quest_info['xp_reward']}** XP e **{quest_info['gold_reward']}** Ouro!"
+        reward_message += f"Você recebeu **{base_xp_reward}** XP{' (+'+str(bonus_xp)+')' if bonus_xp > 0 else ''} e **{base_gold_reward}** Ouro{' (+'+str(bonus_gold)+')' if bonus_gold > 0 else ''}!"
 
         if quest_info.get('item_reward_id') and quest_info.get('item_reward_quantity'):
             item_id = quest_info['item_reward_id']

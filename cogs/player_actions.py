@@ -144,53 +144,63 @@ class PlayerActions(commands.Cog):
             await ctx.send("Você precisa de um personagem para aprimorar itens.")
             return
 
-        inventory = database.get_inventory(user_id)
-        item_to_enhance_data = None
-        for item_data in inventory:
-            if item_name.lower() in item_data[3].lower() and item_data[9] == 0:
-                item_to_enhance_data = item_data
-                break
-        
-        if not item_to_enhance_data:
-            await ctx.send(f"Item '{item_name}' não encontrado no seu inventário ou não é um item base (+0).")
+        # 1. Analisar o nome do item e o nível de aprimoramento
+        parts = item_name.split('+')
+        base_name = parts[0].strip()
+        try:
+            current_enhancement = int(parts[1]) if len(parts) > 1 else 0
+        except ValueError:
+            await ctx.send("Formato inválido. Use `!enhance <nome do item> +<nível>` ou apenas `<nome do item>` para +0.")
             return
 
-        inv_id, item_id, quantity, name, _, item_type, _, _, equip_slot, enhancement_level = item_to_enhance_data
+        # O nível máximo é 13, então não se pode aprimorar um item +13
+        if current_enhancement >= 13:
+            await ctx.send(f"**{base_name} +{current_enhancement}** já está no nível máximo de aprimoramento (+13).")
+            return
+
+        inventory = database.get_inventory(user_id)
+        
+        # 2. Encontrar os itens correspondentes no inventário
+        items_to_enhance = [item for item in inventory if base_name.lower() in item[3].lower() and item[9] == current_enhancement]
+        
+        if not items_to_enhance:
+            display_name = f"{base_name} +{current_enhancement}" if current_enhancement > 0 else base_name
+            await ctx.send(f"Item '{display_name}' não encontrado no seu inventário.")
+            return
+
+        # 3. Verificar a quantidade e os detalhes do item
+        item_details = items_to_enhance[0]
+        _, item_id, _, name, _, item_type, _, _, equip_slot, _ = item_details
+        total_quantity = sum(item[2] for item in items_to_enhance) # item[2] é a quantidade (para stacks)
 
         if item_type not in ['weapon', 'armor']:
             await ctx.send(f"**{name}** não é um item aprimorável.")
             return
 
-        if enhancement_level >= 13:
-            await ctx.send(f"**{name} +{enhancement_level}** já está no nível máximo de aprimoramento.")
+        if total_quantity < 2:
+            display_name = f"{name} +{current_enhancement}" if current_enhancement > 0 else name
+            await ctx.send(f"Você precisa de pelo menos 2x **{display_name}** para tentar o aprimoramento. Você tem {total_quantity}.")
             return
 
-        if quantity < 2:
-            await ctx.send(f"Você precisa de pelo menos 2x **{name} +{enhancement_level}** para tentar o aprimoramento.")
-            return
-
+        # 4. Determinar e verificar a gema necessária
         if item_type == 'weapon':
             gem_name = "Gema de Arma"
         elif item_type == 'armor' and equip_slot == 'ring':
             gem_name = "Gema de Acessório"
         else:
             gem_name = "Gema de Armadura"
-
         gem_item = database.get_item_by_name(gem_name)
-        if not gem_item:
-            await ctx.send(f"Erro de sistema: {gem_name} não encontrada na base de dados.")
-            return
-
         gem_in_inventory = next((item for item in inventory if item[1] == gem_item['id']), None)
         if not gem_in_inventory:
             await ctx.send(f"Você não possui a **{gem_name}** necessária para o aprimoramento.")
             return
 
-        database.remove_item_from_inventory(user_id, item_id, 2, enhancement_level=0)
+        # 5. Consumir materiais e criar o novo item
+        database.remove_item_from_inventory(user_id, item_id, 2, enhancement_level=current_enhancement)
         database.remove_item_from_inventory(user_id, gem_item['id'], 1)
-        database.add_item_to_inventory(user_id, item_id, 1, enhancement_level + 1)
+        database.add_item_to_inventory(user_id, item_id, 1, current_enhancement + 1)
 
-        new_name = f"{name} +{enhancement_level + 1}"
+        new_name = f"{name} +{current_enhancement + 1}"
         await ctx.send(f"✨ **SUCESSO!** ✨\nVocê aprimorou seu equipamento e criou uma **{new_name}**!")
 
     @commands.command(name="equip", help="Equipa um item do seu inventário.")

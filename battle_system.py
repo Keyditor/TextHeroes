@@ -339,11 +339,24 @@ class PVEBattle:
             result_embed = discord.Embed(title="🏆 **VITÓRIA!** 🏆", description=f"Você derrotou o {self.enemy['name']}!", color=discord.Color.green())
 
             # Ganho de XP e Moedas
-            new_experience = self.player['experience'] + self.enemy['xp_reward']
-            new_gold = self.player['gold'] + self.enemy['gold_reward']
+            base_xp_reward = self.enemy['xp_reward']
+            base_gold_reward = self.enemy['gold_reward']
+            
+            xp_bonus_percent = self.player_bonuses.get("special", {}).get("XP_BONUS_PERCENT", 0)
+            gold_bonus_percent = self.player_bonuses.get("special", {}).get("GOLD_BONUS_PERCENT", 0)
+
+            bonus_xp = round(base_xp_reward * (xp_bonus_percent / 100))
+            bonus_gold = round(base_gold_reward * (gold_bonus_percent / 100))
+
+            final_xp_reward = base_xp_reward + bonus_xp
+            final_gold_reward = base_gold_reward + bonus_gold
+
+            new_experience = self.player['experience'] + final_xp_reward
+            new_gold = self.player['gold'] + final_gold_reward
             xp_to_next_level = self.player['level'] * XP_PER_LEVEL_MULTIPLIER
             
-            result_embed.add_field(name="Recompensas", value=f"**{self.enemy['xp_reward']}** de XP\n**{self.enemy['gold_reward']}** de Ouro", inline=False)
+            reward_str = f"**{base_xp_reward}** de XP{' (+'+str(bonus_xp)+')' if bonus_xp > 0 else ''}\n**{base_gold_reward}** de Ouro{' (+'+str(bonus_gold)+')' if bonus_gold > 0 else ''}"
+            result_embed.add_field(name="Recompensas", value=reward_str, inline=False)
 
             updates = {"experience": new_experience, "hp": self.player_hp, "mp": self.player_mp, "gold": new_gold}
 
