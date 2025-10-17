@@ -365,31 +365,13 @@ class PVEBattle:
                 updates['level'] = self.player['level'] + 1
                 updates['experience'] = new_experience - xp_to_next_level
                 
-                await ctx.send(f"🎉 **LEVEL UP!** Você alcançou o nível **{updates['level']}**! 🎉")
-
-                # A cada 5 níveis, o jogador distribui 4 pontos
-                if updates['level'] % 5 == 0 and not self.is_autohunt:
-                    points_to_distribute = 4
-                    await ctx.send(f"Você tem **{points_to_distribute}** pontos para distribuir entre seus atributos: `força`, `constituição`, `destreza`, `inteligência`, `sabedoria`, `carisma`.")
-                    
-                    for i in range(points_to_distribute):
-                        await ctx.send(f"Ponto {i+1}/{points_to_distribute}: Qual atributo você quer aumentar?")
-                        try:
-                            attr_choice_msg = await self.bot.wait_for(
-                                "message",
-                                check=lambda m: m.author.id == user_id and m.channel == ctx.channel and m.content.lower() in ATTRIBUTE_MAP_EN_PT.values(),
-                                timeout=60.0
-                            )
-                            attr_to_increase = attr_choice_msg.content.lower()
-                            
-                            current_value = updates.get(attr_to_increase, self.player[attr_to_increase])
-                            updates[attr_to_increase] = current_value + 1
-                            await ctx.send(f"Seu atributo **{attr_to_increase.capitalize()}** aumentou para **{updates[attr_to_increase]}**!")
-
-                        except asyncio.TimeoutError:
-                            await ctx.send("Tempo esgotado. O ponto de atributo foi perdido.")
-                elif updates['level'] % 5 == 0 and self.is_autohunt:
-                     result_embed.add_field(name="Level Up!", value="Você ganhou pontos de atributo para distribuir! Use o comando `!hunt` manual para subir de nível e distribuí-los.", inline=False)
+                level_up_msg = f"🎉 **LEVEL UP!** Você alcançou o nível **{updates['level']}**! 🎉"
+                # A cada 5 níveis, o jogador ganha pontos para distribuir
+                if updates['level'] % 5 == 0:
+                    points_to_add = 4
+                    updates['unspent_attribute_points'] = self.player['unspent_attribute_points'] + points_to_add
+                    level_up_msg += f"\n✨ Você ganhou **{points_to_add}** pontos de atributo para distribuir! Use `!attribute` para usá-los. ✨"
+                await ctx.send(level_up_msg)
 
                 # Aumenta HP/MP máximo no level up
                 new_constitution = updates.get('constitution', self.player['constitution'])

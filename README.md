@@ -9,14 +9,16 @@ Este projeto foi criado com a intenção de ser um ponto de partida para desenvo
 ## Funcionalidades
 
 *   **Criação de Personagem**: Sistema completo com raças, classes e distribuição de atributos.
-*   **Combate Tático**: Batalhas por turnos com opções de ataque, defesa, habilidades e uso de itens.
-*   **Progressão**: Ganho de XP, sistema de níveis e distribuição de pontos de atributo.
+*   **Progressão Flexível**: Ganhe XP, suba de nível e acumule pontos de atributo para distribuir quando quiser com o comando `!attribute`.
+*   **Combate Tático**: Batalhas por turnos (PvE e PvP) com opções de ataque, defesa, habilidades e uso de itens.
 *   **Inimigos Variados**: Um bestiário com mais de 45 inimigos, incluindo monstros de **Elite** com recompensas maiores.
 *   **Sistema de Itens**: Diversos tipos de itens, incluindo armas, armaduras, consumíveis e materiais.
 *   **Aprimoramento de Equipamentos**: Melhore seus equipamentos até +13 usando gemas especiais.
 *   **Economia**: Lojas para compra/venda e um mercado completo entre jogadores.
 *   **Missões**: Sistema de quests diárias e semanais com recompensas variadas.
 *   **Sistema de Profissões**: Escolha um emprego, trabalhe passivamente e colete seu salário para ganhar ouro.
+*   **Sistema de Grupos**: Forme um grupo com até 4 jogadores para enfrentar desafios maiores.
+*   **Masmorras (Dungeons)**: Aventure-se em masmorras sozinho, em grupo ou com jogadores aleatórios através de uma fila.
 
 ## Expansão de Conteúdo
 

@@ -29,11 +29,12 @@ class Utility(commands.Cog):
             embed = discord.Embed(title="📜 Guia de Comandos do RPG 📜", description="Aqui estão os comandos que você pode usar:", color=discord.Color.blurple())
             
             categories = {
-                "Personagem": ["newchar", "char", "skills", "reset", "migrate"],
-                "Ação": ["hunt", "autohunt", "use", "pvp"],
-                "Interação": ["shop", "market", "job", "work", "payday"],
+                "Personagem": ["newchar", "char", "attribute", "skills", "reset", "migrate"],
+                "Ação": ["hunt", "autohunt", "use"],
                 "Equipamento": ["inventory", "equip", "unequip", "enhance"],
-                "Utilidade": ["quest", "bestiary", "leaderboard", "gm"]
+                "Interação": ["shop", "market", "job", "work", "payday"],
+                "Grupo & Aventura": ["party", "dungeon", "pvp"],
+                "Utilidade": ["quest", "bestiary", "leaderboard", "gm", "help"]
             }
             for category, cmd_list in categories.items():
                 # Filtra comandos que podem não existir ou não foram carregados

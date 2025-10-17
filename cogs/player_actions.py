@@ -2,11 +2,61 @@ import discord
 from discord.ext import commands
 import database
 
+class InventoryView(discord.ui.View):
+    def __init__(self, author_id, character_name, items):
+        super().__init__(timeout=180)
+        self.author_id = author_id
+        self.character_name = character_name
+        self.items = items
+        self.current_page = 0
+        self.items_per_page = 20
+        self.pages = [self.items[i:i + self.items_per_page] for i in range(0, len(self.items), self.items_per_page)]
+        self.total_pages = len(self.pages)
+        self.update_buttons()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("Você não pode controlar este inventário.", ephemeral=True)
+            return False
+        return True
+
+    def update_buttons(self):
+        self.children[0].disabled = self.current_page == 0
+        self.children[1].disabled = self.current_page >= self.total_pages - 1
+
+    def create_embed(self):
+        embed = discord.Embed(
+            title=f"Inventário de {self.character_name}",
+            color=discord.Color.dark_gold()
+        )
+        embed.set_footer(text=f"Página {self.current_page + 1}/{self.total_pages}")
+        
+        page_items = self.pages[self.current_page]
+        for item in page_items:
+            inv_id, item_id, quantity, name, description, item_type, _, _, _, enhancement = item
+            display_name = f"ID: `{inv_id}` | {name} +{enhancement}" if enhancement > 0 else f"ID: `{inv_id}` | {name}"
+            embed.add_field(name=f"{display_name} (x{quantity})", value=description, inline=False)
+        return embed
+
+    @discord.ui.button(label="◀ Anterior", style=discord.ButtonStyle.primary)
+    async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page > 0:
+            self.current_page -= 1
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
+
+    @discord.ui.button(label="Próxima ▶", style=discord.ButtonStyle.primary)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page < self.total_pages - 1:
+            self.current_page += 1
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
+
 class PlayerActions(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command(name="inventory", aliases=["inv"], help="Mostra os itens no seu inventário.")
+    @commands.group(name="inventory", aliases=["inv"], help="Mostra os itens no seu inventário.", invoke_without_command=True)
     async def inventory(self, ctx):
         user_id = ctx.author.id
         character = database.get_character(user_id)
@@ -16,21 +66,31 @@ class PlayerActions(commands.Cog):
 
         items = database.get_inventory(user_id)
 
+        # Ordena os itens por nome (índice 3 da tupla) para exibição
+        items.sort(key=lambda item: item[3])
+
         if not items:
             await ctx.send("Seu inventário está vazio.")
             return
+        
+        view = InventoryView(user_id, character['name'], items)
+        embed = view.create_embed()
+        await ctx.send(embed=embed, view=view)
 
-        embed = discord.Embed(
-            title=f"Inventário de {character['name']}",
-            color=discord.Color.dark_gold()
-        )
+    @inventory.command(name="clean", aliases=["organize", "unify"], help="Organiza seu inventário, unificando itens empilháveis.")
+    async def inventory_clean(self, ctx):
+        user_id = ctx.author.id
+        if not database.get_character(user_id):
+            await ctx.send("Você precisa de um personagem para organizar o inventário.")
+            return
 
-        for item in items:
-            inv_id, item_id, quantity, name, description, item_type, _, _, _, enhancement = item
-            display_name = f"ID: `{inv_id}` | {name} +{enhancement}" if enhancement > 0 else f"ID: `{inv_id}` | {name}"
-            embed.add_field(name=f"{display_name} (x{quantity})", value=description, inline=False)
+        await ctx.send("🧹 Verificando e organizando seu inventário...")
+        unified_count = database.unify_stackable_items(user_id)
 
-        await ctx.send(embed=embed)
+        if unified_count > 0:
+            await ctx.send(f"✨ Organização concluída! {unified_count} tipo(s) de item foram unificados. Use `!inv` para ver o resultado.")
+        else:
+            await ctx.send("✅ Seu inventário já está perfeitamente organizado!")
 
     @commands.command(name="use", help="Usa um item consumível do seu inventário.")
     async def use_item(self, ctx, *args):

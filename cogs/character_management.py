@@ -4,6 +4,102 @@ import asyncio
 import database
 from game_constants import *
 
+class CharacterSheetView(discord.ui.View):
+    def __init__(self, author_id, character, equipped_items, bonuses):
+        super().__init__(timeout=180)
+        self.author_id = author_id
+        self.character = character
+        self.equipped_items = equipped_items
+        self.bonuses = bonuses
+        self.current_page = "main"
+        self.update_buttons()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("Você não pode controlar esta ficha de personagem.", ephemeral=True)
+            return False
+        return True
+
+    def update_buttons(self):
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                child.disabled = child.custom_id == self.current_page
+
+    def create_main_embed(self):
+        """Cria o embed para a página principal (atributos e equipamentos)."""
+        embed = discord.Embed(title=f"Ficha de Personagem: {self.character['name']}", description=f"**Raça:** {self.character['race']} | **Classe:** {self.character['class']}", color=discord.Color.blue())
+        embed.add_field(name="Level", value=self.character['level'], inline=True)
+        embed.add_field(name="XP", value=f"{self.character['experience']} / {self.character['level'] * XP_PER_LEVEL_MULTIPLIER}", inline=True)
+        embed.add_field(name="💰 Gold", value=self.character['gold'], inline=True)
+        embed.add_field(name="✨ Pontos", value=self.character.get('unspent_attribute_points', 0), inline=True)
+        embed.add_field(name="HP", value=f"{self.character['hp']}/{self.character['max_hp']}", inline=True)
+        embed.add_field(name="MP", value=f"{self.character['mp']}/{self.character['max_mp']}", inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=False)
+
+        embed.add_field(name="Força", value=f"{self.character['strength']}", inline=True)
+        embed.add_field(name="Constituição", value=self.character['constitution'], inline=True)
+        embed.add_field(name="Destreza", value=self.character['dexterity'], inline=True)
+        embed.add_field(name="Inteligência", value=self.character['intelligence'], inline=True)
+        embed.add_field(name="Sabedoria", value=self.character['wisdom'], inline=True)
+        embed.add_field(name="Carisma", value=self.character['charisma'], inline=True)
+
+        embed.add_field(name="\u200b", value="--- **Bônus de Equipamento** ---", inline=False)
+        embed.add_field(name="⚔️ Ataque", value=f"+{self.bonuses['attack']}", inline=True)
+        embed.add_field(name="🛡️ Defesa", value=f"+{self.bonuses['defense']}", inline=True)
+
+        embed.add_field(name="\u200b", value="--- **Equipamento** ---", inline=False)
+        embed.add_field(name="Mão Direita", value=self.equipped_items.get('right_hand_id', 'Vazio'), inline=True)
+        embed.add_field(name="Mão Esquerda", value=self.equipped_items.get('left_hand_id', 'Vazio'), inline=True)
+        embed.add_field(name="Capacete", value=self.equipped_items.get('helmet_id', 'Vazio'), inline=True)
+        embed.add_field(name="Peitoral", value=self.equipped_items.get('chest_id', 'Vazio'), inline=True)
+        embed.add_field(name="Pernas", value=self.equipped_items.get('legs_id', 'Vazio'), inline=True)
+        embed.add_field(name="Anel", value=self.equipped_items.get('ring_id', 'Vazio'), inline=True)
+
+        if self.character['image_url']:
+            embed.set_thumbnail(url=f"{self.character['image_url']}?t={int(asyncio.get_event_loop().time())}")
+        embed.set_footer(text=f"ID do Jogador: {self.character['user_id']}")
+        return embed
+
+    def create_special_embed(self):
+        """Cria o embed para a página de bônus especiais."""
+        embed = discord.Embed(title=f"Bônus Especiais - {self.character['name']}", description="Bônus passivos concedidos por seus equipamentos.", color=discord.Color.purple())
+        special_bonuses = self.bonuses.get('special', {})
+        
+        if not special_bonuses:
+            embed.description += "\n\nVocê não possui nenhum bônus especial ativo."
+        else:
+            bonus_map = {
+                'LIFESTEAL_PERCENT': ("🩸 Roubo de Vida", "%"),
+                'GOLD_BONUS_PERCENT': ("💰 Bônus de Ouro", "%"),
+                'XP_BONUS_PERCENT': ("✨ Bônus de XP", "%"),
+                'CRIT_CHANCE_PERCENT': ("🎯 Chance de Crítico", "%"),
+                'MP_REGEN_FLAT': ("💧 Regeneração de MP", " por turno")
+            }
+            for effect, value in special_bonuses.items():
+                name, suffix = bonus_map.get(effect, (effect.replace('_', ' ').title(), ""))
+                embed.add_field(name=name, value=f"**+{value}{suffix}**", inline=True)
+
+        if self.character['image_url']:
+            embed.set_thumbnail(url=f"{self.character['image_url']}?t={int(asyncio.get_event_loop().time())}")
+        embed.set_footer(text="Estes bônus são aplicados automaticamente em batalhas e ao ganhar recompensas.")
+        return embed
+
+    @discord.ui.button(label="Ficha Principal", style=discord.ButtonStyle.primary, custom_id="main")
+    async def main_page_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page = "main"
+        self.update_buttons()
+        embed = self.create_main_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Bônus Especiais", style=discord.ButtonStyle.secondary, custom_id="special")
+    async def special_page_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page = "special"
+        self.update_buttons()
+        embed = self.create_special_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+
+
 class CharacterManagement(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -129,39 +225,68 @@ class CharacterManagement(commands.Cog):
             return
 
         equipped_items, bonuses = database.get_equipped_items(user_id)
+        view = CharacterSheetView(user_id, character, equipped_items, bonuses)
+        embed = view.create_main_embed()
+        await ctx.send(embed=embed, view=view)
+
+    @commands.command(name="attribute", aliases=["attributes", "attr"], help="Distribui seus pontos de atributo ganhos.")
+    async def distribute_attributes(self, ctx, *args):
+        user_id = ctx.author.id
+        character = database.get_character(user_id)
+        if not character:
+            await ctx.send("Você não tem um personagem.")
+            return
+
+        unspent_points = character.get('unspent_attribute_points', 0)
+        if unspent_points <= 0:
+            await ctx.send("Você não tem pontos de atributo para distribuir.")
+            return
+
+        if not args:
+            await ctx.send(f"Você tem **{unspent_points}** pontos para distribuir.\nUso: `!attribute <atributo> <quantidade>`\nAtributos: `força`, `constituição`, `destreza`, `inteligência`, `sabedoria`, `carisma`.")
+            return
+
+        if len(args) != 2 or not args[1].isdigit():
+            await ctx.send("Formato inválido. Uso: `!attribute <atributo> <quantidade>` (ex: `!attribute força 2`).")
+            return
+
+        attr_name_pt = args[0].lower()
+        points_to_spend = int(args[1])
+
+        if attr_name_pt not in ATTRIBUTE_MAP_PT_EN:
+            await ctx.send(f"Atributo '{attr_name_pt}' inválido. Atributos disponíveis: `força`, `constituição`, `destreza`, `inteligência`, `sabedoria`, `carisma`.")
+            return
+
+        if points_to_spend <= 0:
+            await ctx.send("A quantidade de pontos deve ser positiva.")
+            return
+
+        if points_to_spend > unspent_points:
+            await ctx.send(f"Você não tem pontos suficientes. Você só tem {unspent_points} ponto(s).")
+            return
+
+        attr_name_en = ATTRIBUTE_MAP_PT_EN[attr_name_pt]
         
-        embed = discord.Embed(title=f"Ficha de Personagem: {character['name']}", description=f"**Raça:** {character['race']} | **Classe:** {character['class']}", color=discord.Color.blue())
-        embed.add_field(name="Level", value=character['level'], inline=True)
-        embed.add_field(name="XP", value=f"{character['experience']} / {character['level'] * XP_PER_LEVEL_MULTIPLIER}", inline=True)
-        embed.add_field(name="💰 Gold", value=character['gold'], inline=True)
-        embed.add_field(name="HP", value=f"{character['hp']}/{character['max_hp']}", inline=True)
-        embed.add_field(name="MP", value=f"{character['mp']}/{character['max_mp']}", inline=True)
-        embed.add_field(name="\u200b", value="\u200b", inline=True)
+        current_value = character[attr_name_en]
+        new_value = current_value + points_to_spend
 
-        embed.add_field(name="Força", value=f"{character['strength']}", inline=True)
-        embed.add_field(name="Constituição", value=character['constitution'], inline=True)
-        embed.add_field(name="Destreza", value=character['dexterity'], inline=True)
-        embed.add_field(name="Inteligência", value=character['intelligence'], inline=True)
-        embed.add_field(name="Sabedoria", value=character['wisdom'], inline=True)
-        embed.add_field(name="Carisma", value=character['charisma'], inline=True)
+        updates = {
+            attr_name_en: new_value,
+            'unspent_attribute_points': unspent_points - points_to_spend
+        }
 
-        embed.add_field(name="\u200b", value="--- **Bônus de Equipamento** ---", inline=False)
-        embed.add_field(name="⚔️ Ataque", value=f"+{bonuses['attack']}", inline=True)
-        embed.add_field(name="🛡️ Defesa", value=f"+{bonuses['defense']}", inline=True)
+        # Recalcula HP/MP se os atributos relevantes forem alterados
+        if attr_name_en == 'constitution':
+            # A cada 4 pontos de constituição, ganha 10 de HP base.
+            hp_gain = (new_value // 4 - current_value // 4) * 10
+            updates['max_hp'] = character['max_hp'] + hp_gain
+        if attr_name_en == 'intelligence':
+            mp_gain = (new_value // 4 - current_value // 4) * 5
+            updates['max_mp'] = character['max_mp'] + mp_gain
 
-        embed.add_field(name="\u200b", value="--- **Equipamento** ---", inline=False)
-        embed.add_field(name="Mão Direita", value=equipped_items.get('right_hand_id', 'Vazio'), inline=True)
-        embed.add_field(name="Mão Esquerda", value=equipped_items.get('left_hand_id', 'Vazio'), inline=True)
-        embed.add_field(name="Capacete", value=equipped_items.get('helmet_id', 'Vazio'), inline=True)
-        embed.add_field(name="Peitoral", value=equipped_items.get('chest_id', 'Vazio'), inline=True)
-        embed.add_field(name="Pernas", value=equipped_items.get('legs_id', 'Vazio'), inline=True)
-        embed.add_field(name="Anel", value=equipped_items.get('ring_id', 'Vazio'), inline=True)
+        database.update_character_stats(user_id, updates)
 
-        if character['image_url']:
-            embed.set_thumbnail(url=f"{character['image_url']}?t={int(asyncio.get_event_loop().time())}")
-
-        embed.set_footer(text=f"ID do Jogador: {character['user_id']}")
-        await ctx.send(embed=embed)
+        await ctx.send(f"✅ Pontos distribuídos! Sua **{attr_name_pt.capitalize()}** aumentou para **{new_value}**. Você ainda tem {updates['unspent_attribute_points']} ponto(s) restante(s).")
 
     @commands.command(name="skills", aliases=["habilidades"], help="Mostra as habilidades disponíveis para sua classe e nível.")
     async def show_skills(self, ctx):

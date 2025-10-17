@@ -235,6 +235,7 @@ def migrate_db():
                 ("gold", "INTEGER NOT NULL DEFAULT 0"),
                 ("pvp_wins", "INTEGER NOT NULL DEFAULT 0"),
                 ("pvp_losses", "INTEGER NOT NULL DEFAULT 0"),
+                ("unspent_attribute_points", "INTEGER NOT NULL DEFAULT 0"),
                 ("current_job_id", "INTEGER", "FOREIGN KEY (current_job_id) REFERENCES jobs(id)"),
                 ("job_started_at", "TIMESTAMP"),
                 ("last_payday", "TIMESTAMP"),
@@ -320,6 +321,7 @@ def init_db():
             gold INTEGER NOT NULL DEFAULT 0,
             pvp_wins INTEGER NOT NULL DEFAULT 0,
             pvp_losses INTEGER NOT NULL DEFAULT 0,
+            unspent_attribute_points INTEGER NOT NULL DEFAULT 0,
             current_job_id INTEGER,
             job_started_at TIMESTAMP,
             last_payday TIMESTAMP,
@@ -667,11 +669,11 @@ def get_enemy_by_name(enemy_name):
     return None
 
 def _add_item_to_inventory(cursor, user_id, item_id, quantity=1, enhancement_level=0):
-    """Lógica interna para adicionar um item, reutilizando um cursor existente."""
-    item_info = get_item_by_id(item_id)
+    """Lógica interna para adicionar um item, reutilizando um cursor existente. Requer que o item_info seja passado."""
+    item_info = get_item_by_id_with_cursor(item_id, cursor)
     is_stackable = item_info['item_type'] in ['potion', 'material']
 
-    if is_stackable and enhancement_level == 0:
+    if is_stackable:
         cursor.execute("SELECT id, quantity FROM inventory WHERE character_user_id = ? AND item_id = ? AND enhancement_level = 0", (user_id, item_id))
         existing_item = cursor.fetchone()
         if existing_item:
@@ -689,7 +691,8 @@ def _add_item_to_inventory(cursor, user_id, item_id, quantity=1, enhancement_lev
 def add_item_to_inventory(user_id, item_id, quantity=1, enhancement_level=0):
     """Adiciona um item (ou aumenta a quantidade) ao inventário do jogador."""
     with db_cursor() as cursor:
-        _add_item_to_inventory(cursor, user_id, item_id, quantity, enhancement_level)
+        item_info = get_item_by_id_with_cursor(item_id, cursor)
+        _add_item_to_inventory(cursor, user_id, item_id, quantity, enhancement_level) # A lógica de stack já está aqui
 
 def _remove_item_from_inventory(cursor, user_id, item_id, quantity=1, enhancement_level=0):
     """Lógica interna para remover um item, reutilizando um cursor existente."""
@@ -747,6 +750,45 @@ def get_item_by_id(item_id):
             columns = [description[0] for description in cursor.description]
             return dict(zip(columns, item_data))
     return None
+
+def unify_stackable_items(user_id):
+    """Unifica itens empilháveis duplicados no inventário de um jogador."""
+    with db_cursor() as cursor:
+        # 1. Encontra todos os item_id empilháveis que o jogador possui e que estão duplicados
+        cursor.execute("""
+            SELECT item_id
+            FROM inventory
+            WHERE character_user_id = ? AND enhancement_level = 0 AND item_id IN (
+                SELECT id FROM loot_table WHERE item_type IN ('potion', 'material')
+            )
+            GROUP BY item_id
+            HAVING COUNT(id) > 1
+        """, (user_id,))
+        items_to_unify = cursor.fetchall()
+
+        if not items_to_unify:
+            return 0
+
+        for item_tuple in items_to_unify:
+            item_id = item_tuple[0]
+            # 2. Soma a quantidade total e deleta as entradas antigas
+            cursor.execute("SELECT SUM(quantity) FROM inventory WHERE character_user_id = ? AND item_id = ?", (user_id, item_id))
+            total_quantity = cursor.fetchone()[0]
+            cursor.execute("DELETE FROM inventory WHERE character_user_id = ? AND item_id = ?", (user_id, item_id))
+            # 3. Insere uma nova entrada unificada
+            cursor.execute("INSERT INTO inventory (character_user_id, item_id, quantity) VALUES (?, ?, ?)", (user_id, item_id, total_quantity))
+        
+        return len(items_to_unify)
+
+def get_item_by_id_with_cursor(item_id, cursor):
+    """Busca um item na loot_table pelo ID usando um cursor existente."""
+    cursor.execute("SELECT * FROM loot_table WHERE id = ?", (item_id,))
+    item_data = cursor.fetchone()
+    if item_data:
+        columns = [description[0] for description in cursor.description]
+        return dict(zip(columns, item_data))
+    return None
+
 
 def get_shop_items(category=None, page=1, per_page=5):
     """Retorna itens da loja com filtro de categoria e paginação."""
@@ -815,12 +857,21 @@ def get_equipped_items(user_id):
                     final_attack = round(attack * (1 + 0.15 * enhancement))
                     final_defense = round(defense * (1 + 0.15 * enhancement))
 
-                    equipped_item_details[slot] = f"{name} +{enhancement}" if enhancement > 0 else name
+                    display_name = f"{name} +{enhancement}" if enhancement > 0 else name
+                    equipped_item_details[slot] = display_name
                     total_attack_bonus += final_attack
                     total_defense_bonus += final_defense
 
                     if effect_type:
-                        special_bonuses[effect_type] = effect_value
+                        # Aplica bônus de aprimoramento a efeitos especiais
+                        # Bônus de 10% por nível para efeitos especiais
+                        final_effect_value = effect_value
+                        if enhancement > 0 and effect_type in ['LIFESTEAL_PERCENT', 'GOLD_BONUS_PERCENT', 'XP_BONUS_PERCENT', 'CRIT_CHANCE_PERCENT', 'MP_REGEN_FLAT']:
+                            final_effect_value = round(effect_value * (1 + 0.10 * enhancement))
+                            # Adiciona um indicador visual ao nome do item na ficha para mostrar o bônus
+                            equipped_item_details[slot] = f"{display_name} ({final_effect_value}%)" if '%' in effect_type else f"{display_name} (+{final_effect_value})"
+
+                        special_bonuses[effect_type] = final_effect_value
                         if effect_duration:
                             duration_bonuses[effect_type] = effect_duration
             else:

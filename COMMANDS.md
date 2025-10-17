@@ -13,6 +13,9 @@ Aqui você encontrará uma lista completa de todos os comandos disponíveis no b
 *   `!char`
     *   **Função**: Mostra a ficha do seu personagem, incluindo atributos e equipamentos.
     *   **Subcomando**: `!char img <url>` - Define uma imagem para seu personagem.
+*   `!attribute <atributo> <quantidade>`
+    *   **Função**: Distribui os pontos de atributo que você acumulou ao subir de nível.
+    *   **Exemplo**: `!attribute força 2`
 *   `!skills`
     *   **Função**: Lista todas as habilidades que seu personagem aprendeu e pode usar em batalha.
 *   `!reset`
@@ -30,11 +33,6 @@ Aqui você encontrará uma lista completa de todos os comandos disponíveis no b
     *   **Função**: Inicia uma batalha automática para farm. Também suporta caça direcionada.
 *   `!use [qtd] <item>`
     *   **Função**: Usa um item consumível do seu inventário.
-*   `!pvp`
-    *   **Função**: Gerencia duelos entre jogadores.
-    *   **Subcomando**: `!pvp challenge [ranked] <nome>` - Desafia outro jogador para um duelo.
-    *   **Subcomando**: `!pvp accept` - Aceita um desafio de duelo pendente.
-    *   **Subcomando**: `!pvp decline` - Recusa um desafio de duelo pendente.
 
 ---
 
@@ -42,6 +40,7 @@ Aqui você encontrará uma lista completa de todos os comandos disponíveis no b
 
 *   `!inventory` ou `!inv`
     *   **Função**: Mostra todos os itens no seu inventário.
+    *   **Subcomando**: `!inv clean` - Organiza o inventário, unificando itens empilháveis.
 *   `!equip <ID ou nome do item>`
     *   **Função**: Equipa um item do seu inventário.
 *   `!unequip <slot>`
@@ -73,6 +72,35 @@ Aqui você encontrará uma lista completa de todos os comandos disponíveis no b
     *   **Função**: "Bate o ponto" no seu trabalho para acumular horas e continuar ganhando ouro.
 *   `!payday`
     *   **Função**: Coleta seu salário acumulado. Pode ser usado uma vez por dia.
+
+---
+
+### Grupo & Aventura
+
+*   `!party`
+    *   **Função**: Gerencia seu grupo de aventureiros.
+    *   **Subcomando**: `!party create` - Cria um novo grupo e te torna o líder.
+    *   **Subcomando**: `!party invite <@membro>` - Convida um jogador para o seu grupo (apenas líder).
+    *   **Subcomando**: `!party accept` - Aceita um convite de grupo pendente.
+    *   **Subcomando**: `!party decline` - Recusa um convite de grupo.
+    *   **Subcomando**: `!party leave` - Sai do seu grupo atual.
+    *   **Subcomando**: `!party kick <@membro>` - Remove um jogador do seu grupo (apenas líder).
+    *   **Subcomando**: `!party disband` - Dissolve o grupo (apenas líder).
+*   `!dungeon`
+    *   **Função**: Gerencia as masmorras.
+    *   **Subcomando**: `!dungeon list` - Lista todas as masmorras disponíveis.
+    *   **Subcomando**: `!dungeon solo <nome>` - Entra em uma masmorra sozinho (recompensas aumentadas).
+    *   **Subcomando**: `!dungeon party <nome>` - Entra em uma masmorra com seu grupo atual (apenas líder).
+    *   **Subcomando**: `!dungeon queue <nome>` - Entra na fila para encontrar um grupo aleatório para uma masmorra.
+    *   **Subcomando**: `!dungeon leavequeue` - Sai da fila de masmorra.
+    *   **Subcomando**: `!dungeon accept` - Aceita uma partida encontrada pela fila.
+*   `!pvp`
+    *   **Função**: Gerencia duelos entre jogadores.
+    *   **Subcomando**: `!pvp challenge [ranked] <nome>` - Desafia outro jogador para um duelo.
+    *   **Subcomando**: `!pvp accept` - Aceita um desafio de duelo pendente.
+    *   **Subcomando**: `!pvp decline` - Recusa um desafio de duelo pendente.
+
+
 
 ---
 

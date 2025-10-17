@@ -354,6 +354,11 @@ class WorldInteractions(commands.Cog):
 
         database.update_character_stats(user_id, {"gold": character['gold'] - total_cost})
         database.add_item_to_inventory(user_id, item_to_buy['id'], quantity)
+
+        # Se comprou múltiplos itens empilháveis, roda a limpeza silenciosamente
+        if quantity > 1 and item_to_buy['item_type'] in ['potion', 'material']:
+            database.unify_stackable_items(user_id)
+
         await ctx.send(f"Você comprou {quantity}x **{item_to_buy['name']}** por {total_cost} de ouro!")
 
     @shop.command(name="sell", help="Vende um item do seu inventário.")

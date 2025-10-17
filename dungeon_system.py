@@ -143,7 +143,7 @@ class DungeonRun:
                 for e in enemies_alive:
                     enemy_status_str += f"`{e['id_in_battle']}`: **{e['name']}** - ❤️ HP: {e['current_hp']}\n"
                 embed.add_field(name="Inimigos", value=enemy_status_str, inline=False)
-                embed.set_footer(text=f"Ação de {player_char['name']}? `atacar <ID>`, `habilidade`, `item`")
+                embed.set_footer(text=f"Ação de {player_char['name']}? `atacar <ID>`, `habilidade`, `item`.")
                 await channel.send(embed=embed)
 
                 try:
@@ -168,8 +168,14 @@ class DungeonRun:
                             await channel.send(f"☠️ **{target_enemy['name']}** foi derrotado!")
                             self.total_xp_reward += target_enemy['xp_reward']
                             self.total_gold_reward += target_enemy['gold_reward']
+                    
+                    elif action in ["habilidade", "skill"]:
+                        await self._handle_skill_action(channel, player_char, player_state, enemies_alive)
+
+                    elif action == "item":
+                        await self._handle_item_action(channel, player_char, player_state)
                     else:
-                        await channel.send(f"Ação inválida para **{player_char['name']}**. Turno perdido. (Ações: `atacar <ID>`)")
+                        await channel.send(f"Ação inválida para **{player_char['name']}**. Turno perdido. (Ações: `atacar <ID>`, `habilidade`, `item`)")
 
                 except (asyncio.TimeoutError, ValueError):
                     await channel.send(f"**{player_char['name']}** demorou para agir e perdeu o turno.")
@@ -202,6 +208,119 @@ class DungeonRun:
 
         return any(p['is_alive'] for p in self.players_state.values())
 
+    async def _handle_skill_action(self, channel, player_char, player_state, enemies):
+        """Lida com o uso de habilidades em combate de masmorra."""
+        skills = database.get_character_skills(player_char['class'], player_char['level'])
+        if not skills:
+            await channel.send("Você não tem habilidades para usar. Turno perdido.")
+            return
+
+        skill_list_str = "\n".join([f"`{idx+1}`: **{s['name']}** (Custo: {s['mp_cost']} MP)" for idx, s in enumerate(skills)])
+        await channel.send(f"Qual habilidade usar?\n{skill_list_str}\nDigite o número ou `cancelar`.")
+
+        try:
+            choice_msg = await self.bot.wait_for("message", check=lambda m: m.author.id == player_char['user_id'] and m.channel == channel, timeout=30.0)
+            if choice_msg.content.lower() == 'cancelar':
+                await channel.send("Uso de habilidade cancelado. Turno perdido.")
+                return
+
+            choice_idx = int(choice_msg.content) - 1
+            if not (0 <= choice_idx < len(skills)):
+                await channel.send("Escolha inválida. Turno perdido.")
+                return
+
+            skill = skills[choice_idx]
+            if player_state['mp'] < skill['mp_cost']:
+                await channel.send(f"MP insuficiente para usar **{skill['name']}**. Turno perdido.")
+                return
+
+            player_state['mp'] -= skill['mp_cost']
+            
+            # Lógica de dano (simplificada para masmorras)
+            if skill['effect_type'] in ['DAMAGE', 'DAMAGE_PIERCING', 'DAMAGE_AND_POISON']:
+                await channel.send(f"Qual inimigo atacar com **{skill['name']}**? (Digite o ID)")
+                target_msg = await self.bot.wait_for("message", check=lambda m: m.author.id == player_char['user_id'] and m.channel == channel, timeout=30.0)
+                target_id_str = target_msg.content.lower()
+                target_id = int(target_id_str) if target_id_str != 'chefe' else 'Chefe'
+                target_enemy = next((e for e in enemies if e['id_in_battle'] == target_id), None)
+                
+                if not target_enemy:
+                    await channel.send("Alvo inválido. Turno perdido.")
+                    return
+
+                scaling_stat_value = player_char.get(skill['scaling_stat'], 0)
+                total_effect_value = round(skill['base_value'] + (scaling_stat_value * skill['scaling_factor']))
+                
+                defense_reduction = target_enemy['defense']
+                if skill['effect_type'] == 'DAMAGE_PIERCING':
+                    defense_reduction //= 2
+
+                damage = max(0, total_effect_value - defense_reduction)
+                target_enemy['current_hp'] -= damage
+                
+                await channel.send(f"✨ **{player_char['name']}** usa **{skill['name']}** em **{target_enemy['name']}** e causa **{damage}** de dano!")
+                if target_enemy['current_hp'] <= 0:
+                    await channel.send(f"☠️ **{target_enemy['name']}** foi derrotado!")
+                    self.total_xp_reward += target_enemy['xp_reward']
+                    self.total_gold_reward += target_enemy['gold_reward']
+
+            elif skill['effect_type'] == 'HEAL':
+                scaling_stat_value = player_char.get(skill['scaling_stat'], 0)
+                total_effect_value = round(skill['base_value'] + (scaling_stat_value * skill['scaling_factor']))
+                healed = min(player_state['original']['max_hp'] - player_state['hp'], total_effect_value)
+                player_state['hp'] += healed
+                await channel.send(f"💖 **{player_char['name']}** usa **{skill['name']}** e se cura em **{healed}** HP!")
+
+            else:
+                await channel.send(f"A habilidade **{skill['name']}** ainda não tem efeito em masmorras. Turno perdido.")
+
+        except (asyncio.TimeoutError, ValueError):
+            await channel.send("Tempo esgotado ou escolha inválida. Turno perdido.")
+
+    async def _handle_item_action(self, channel, player_char, player_state):
+        """Lida com o uso de itens em combate de masmorra."""
+        inventory = database.get_inventory(player_char['user_id'])
+        consumables = [item for item in inventory if item[5] == 'potion'] # item_type
+
+        if not consumables:
+            await channel.send("Você não tem itens consumíveis. Turno perdido.")
+            return
+
+        item_list_str = "\n".join([f"`{idx+1}`: {item[3]} (x{item[2]})" for idx, item in enumerate(consumables)])
+        await channel.send(f"Qual item usar?\n{item_list_str}\nDigite o número ou `cancelar`.")
+
+        try:
+            choice_msg = await self.bot.wait_for("message", check=lambda m: m.author.id == player_char['user_id'] and m.channel == channel, timeout=30.0)
+            if choice_msg.content.lower() == 'cancelar':
+                await channel.send("Uso de item cancelado. Turno perdido.")
+                return
+
+            choice_idx = int(choice_msg.content) - 1
+            if not (0 <= choice_idx < len(consumables)):
+                await channel.send("Escolha inválida. Turno perdido.")
+                return
+
+            item_to_use = consumables[choice_idx]
+            _, item_id, _, name, _, _, effect_type, effect_value, _, _ = item_to_use
+
+            if database.remove_item_from_inventory(player_char['user_id'], item_id, 1):
+                if effect_type == 'HEAL_HP':
+                    healed = min(player_state['original']['max_hp'] - player_state['hp'], effect_value)
+                    player_state['hp'] += healed
+                    await channel.send(f"**{player_char['name']}** usou **{name}** e recuperou **{healed}** de HP.")
+                elif effect_type == 'HEAL_MP':
+                    healed = min(player_state['original']['max_mp'] - player_state['mp'], effect_value)
+                    player_state['mp'] += healed
+                    await channel.send(f"**{player_char['name']}** usou **{name}** e recuperou **{healed}** de MP.")
+                else:
+                    await channel.send(f"O item **{name}** não pode ser usado em combate. Turno perdido.")
+                    database.add_item_to_inventory(player_char['user_id'], item_id, 1) # Devolve o item
+            else:
+                await channel.send("Falha ao usar o item do inventário.")
+
+        except (asyncio.TimeoutError, ValueError):
+            await channel.send("Tempo esgotado ou escolha inválida. Turno perdido.")
+
     async def run_rest_stage(self, channel):
         """Executa um estágio de descanso, permitindo o uso de itens."""
         self.log.append("O grupo encontra uma área segura para descansar.")
@@ -220,7 +339,7 @@ class DungeonRun:
         def check(m):
             is_member = m.author.id in self.players_state
             is_leader_action = m.author.id == self.leader_id and m.content.lower() == 'continuar'
-            is_member_action = m.content.lower().startswith('!use')
+            is_member_action = m.content.lower().startswith(self.bot.command_prefix + 'use')
             return m.channel == channel and is_member and (is_leader_action or is_member_action)
 
         while True:
@@ -232,7 +351,7 @@ class DungeonRun:
                     break
                 
                 # Simula o comando !use, mas aplicando ao estado da masmorra
-                if action_msg.content.lower().startswith('!use'):
+                if action_msg.content.lower().startswith(self.bot.command_prefix + 'use'):
                     user_id = action_msg.author.id
                     player_state = self.players_state[user_id]
                     if not player_state['is_alive']:
@@ -240,7 +359,7 @@ class DungeonRun:
                         continue
 
                     parts = action_msg.content.split()
-                    item_name = " ".join(parts[1:])
+                    item_name = " ".join(parts[1:]) # Assumes prefix + command, then item name
                     
                     # Busca o item no inventário real do jogador
                     inventory = database.get_inventory(user_id)
@@ -250,7 +369,7 @@ class DungeonRun:
                         await channel.send("Item não encontrado ou não é uma poção.")
                         continue
 
-                    item_id, _, _, name, _, _, effect_type, effect_value, _, _ = item_to_use_data
+                    _, item_id, _, name, _, _, effect_type, effect_value, _, _ = item_to_use_data
 
                     # Remove o item do inventário real
                     if not database.remove_item_from_inventory(user_id, item_id, 1):

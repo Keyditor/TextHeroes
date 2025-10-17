@@ -25,6 +25,23 @@ Esta tabela armazena todos os monstros que os jogadores podem encontrar.
 
 ---
 
+## 2. Tabela `boss_enemies` (Chefes de Masmorra)
+
+Esta tabela armazena os chefes encontrados no final das masmorras. A estrutura é similar à dos inimigos comuns, mas sem `min_level` e `max_level`.
+
+| Coluna | Tipo | Descrição Detalhada | Exemplo |
+| :--- | :--- | :--- | :--- |
+| `id` | `INTEGER` | **(Automático)** ID único do chefe. | `1` |
+| `name` | `TEXT` | O nome do chefe. | `Rei Goblin` |
+| `hp` | `INTEGER` | A quantidade de pontos de vida (HP) do chefe. | `1500` |
+| `attack` | `INTEGER` | O poder de ataque base do chefe. | `50` |
+| `defense` | `INTEGER` | A defesa base do chefe. | `30` |
+| `xp_reward` | `INTEGER` | A quantidade de experiência (XP) que o grupo ganha ao derrotá-lo. | `1000` |
+| `gold_reward` | `INTEGER` | A quantidade de ouro que o grupo ganha ao derrotá-lo. | `500` |
+| `image_url` | `TEXT` | URL de uma imagem para o chefe. | `https://i.imgur.com/M8G9zEE.png` |
+
+---
+
 ## 2. Tabela `loot_table` (Itens)
 
 Esta é a tabela mestre para todos os itens do jogo.
@@ -44,6 +61,7 @@ Esta é a tabela mestre para todos os itens do jogo.
 | `attack_bonus`| `INTEGER` | Bônus de ataque que o item concede. | `8` |
 | `defense_bonus`| `INTEGER` | Bônus de defesa que o item concede. | `2` |
 | `effect_duration`| `INTEGER` | Para efeitos de status (como `POISON_ON_HIT`), define a duração em turnos. | `3` |
+| `boss_drop_id`| `INTEGER` | O `id` do chefe da tabela `boss_enemies` que pode dropar este item. Deixe `NULL` se for um drop comum. | `1` |
 
 ---
 
@@ -84,6 +102,20 @@ Esta tabela contém todas as missões disponíveis no jogo.
 | `gold_reward`| `INTEGER` | A quantidade de ouro recebida ao completar a missão. | `100` |
 | `item_reward_id`| `INTEGER` | O `id` de um item da `loot_table` a ser dado como recompensa. Deixe `NULL` se não houver. | `2` |
 | `item_reward_quantity`| `INTEGER` | A quantidade do item de recompensa a ser dado. | `3` |
+
+---
+
+## 6. Tabela `dungeons` (Masmorras)
+
+Esta tabela define as masmorras que os jogadores podem explorar.
+
+| Coluna | Tipo | Descrição Detalhada | Exemplo |
+| :--- | :--- | :--- | :--- |
+| `id` | `INTEGER` | ID único da masmorra. | `1` |
+| `name` | `TEXT` | Nome da masmorra. | `Caverna dos Goblins` |
+| `description`| `TEXT` | Descrição curta da masmorra. | `Uma caverna infestada de goblins e seu rei.` |
+| `level_req` | `INTEGER` | O nível mínimo que o personagem precisa ter para entrar na masmorra. | `5` |
+| `boss_id`| `INTEGER` | O `id` do chefe da tabela `boss_enemies` que se encontra no final desta masmorra. | `1` |
 
 ---
 
