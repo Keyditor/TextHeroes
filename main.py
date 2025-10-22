@@ -33,6 +33,7 @@ bot.active_pvp_battles = {} # Armazena batalhas ativas {user_id: battle_instance
 bot.active_pve_battles = {} # Armazena batalhas PVE ativas {user_id: battle_instance}
 bot.active_dungeons = {} # Armazena masmorras ativas {user_id: dungeon_instance}
 bot.dungeon_queues = {} # Armazena as filas para masmorras {dungeon_name: [user_id]}
+bot.narrative_sessions = {} # Armazena sessões de narração ativas {user_id: session_instance}
 bot.dungeon_match_prompts = {} # Armazena os "pronto-check" {match_id: {players: {user_id: status}}}
 bot.debug_mode = False # Controla a exibição de logs de cálculo no console
 
@@ -86,7 +87,7 @@ async def on_ready():
 async def load_cogs():
     """Carrega todos os cogs da pasta /cogs."""
     for filename in os.listdir('./cogs'):
-        if filename.endswith('.py'):
+        if filename.endswith('.py') and not filename.startswith('__'):
             await bot.load_extension(f'cogs.{filename[:-3]}')
             print(f"Cog '{filename[:-3]}' carregado.")
 

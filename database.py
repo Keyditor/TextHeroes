@@ -1,4 +1,5 @@
 import sqlite3
+import json
 from contextlib import contextmanager
 
 DATABASE_NAME = "rpg_data.db"
@@ -519,6 +520,15 @@ def init_db():
         # Garante que as chaves de reset existam
         cursor.execute("INSERT OR IGNORE INTO server_state (key, value) VALUES ('last_daily_reset', '2000-01-01')")
         cursor.execute("INSERT OR IGNORE INTO server_state (key, value) VALUES ('last_weekly_reset', '2000-01-01')")
+
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS narrative_history (
+            character_user_id INTEGER PRIMARY KEY,
+            history_json TEXT NOT NULL,
+            FOREIGN KEY (character_user_id) REFERENCES characters(user_id) ON DELETE CASCADE
+        )
+        """)
+
 
 
 
@@ -1264,6 +1274,28 @@ def get_boss_loot(boss_id):
             columns = [description[0] for description in cursor.description]
             return [dict(zip(columns, loot)) for loot in loot_data]
     return []
+
+# --- Funções de Narração (Narrator) ---
+
+def get_narrative_history(user_id):
+    """Busca o histórico de narração de um jogador."""
+    with db_cursor() as cursor:
+        cursor.execute("SELECT history_json FROM narrative_history WHERE character_user_id = ?", (user_id,))
+        result = cursor.fetchone()
+        if result:
+            return json.loads(result[0])
+    return None
+
+def save_narrative_history(user_id, history):
+    """Salva ou atualiza o histórico de narração de um jogador."""
+    with db_cursor() as cursor:
+        history_json = json.dumps(history)
+        cursor.execute(
+            "INSERT OR REPLACE INTO narrative_history (character_user_id, history_json) VALUES (?, ?)",
+            (user_id, history_json)
+        )
+        return cursor.rowcount > 0
+
 
 
 if __name__ == "__main__":
