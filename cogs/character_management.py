@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 import asyncio
 import database
+from config import GENERAL_CHANNEL_NAME
 from game_constants import *
 
 class CharacterSheetView(discord.ui.View):
