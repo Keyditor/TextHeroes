@@ -1,5 +1,6 @@
 # e:\PYPROJECTS\RPG-DISCORD\narrator_system.py
 import discord
+import json
 import asyncio
 import re
 from openai import AsyncOpenAI
@@ -25,8 +26,17 @@ class NarrativeSession:
             self.history = []
             self._initialize_prompt()
         else:
-            # Adiciona uma instrução para a IA continuar a história
-            continue_prompt = f"A aventura de {self.player['name']} continua. Lembre-se de tudo que aconteceu antes e prossiga a jornada."
+            # Verifica se há um resultado de batalha recente não processado
+            last_battle_result = self.bot.last_battle_results.pop(self.user_id, None)
+            
+            continue_prompt = f"A aventura de {self.player['name']} continua."
+            
+            if last_battle_result:
+                # Adiciona o evento recente ao contexto da IA
+                continue_prompt += f" Evento recente importante: {last_battle_result}. Leve isso em consideração ao iniciar a narração."
+            
+            continue_prompt += " Lembre-se de tudo que aconteceu antes e prossiga a jornada."
+
             self.history.append({"role": "system", "content": continue_prompt})
 
     def _initialize_prompt(self):
@@ -48,6 +58,7 @@ class NarrativeSession:
         4.  Para acionar eventos no jogo, use as seguintes tags ESPECIAIS no final da sua resposta:
             - `[BATTLE:NomeDoInimigo]` para iniciar um combate. Use inimigos que existem no jogo, como 'Goblin', 'Lobo', 'Esqueleto'.
             - `[REWARD:XP=valor,GOLD=valor]` para dar recompensas. Ex: `[REWARD:XP=50,GOLD=25]`.
+            - `[CREATE_ITEM:name="Nome",description="Desc.",type="weapon/armor",slot="right_hand/chest",attack=5,defense=1,rarity="unique"]` para criar um item único. Pondere o poder do item com base nos feitos do jogador. Itens criados devem ter `rarity="unique"`.
             - `[END]` para terminar a aventura de forma conclusiva.
 
         Exemplo de resposta:
@@ -85,12 +96,17 @@ class NarrativeSession:
             except Exception as e:
                 print(f"Falha ao resumir o histórico: {e}")
 
-    async def get_ai_response(self):
+    async def get_ai_response(self, custom_prompt=None):
         """Envia o histórico para a API da OpenAI e obtém a próxima narração."""
+        messages_to_send = self.history
+        if custom_prompt:
+            # Cria uma cópia para não modificar o histórico original da sessão
+            messages_to_send = self.history + [{"role": "system", "content": custom_prompt}]
+
         try:
             response = await client.chat.completions.create(
                 model=OPENAI_MODEL, # Usa o modelo do arquivo de configuração
-                messages=self.history,
+                messages=messages_to_send,
                 temperature=0.7,
                 max_tokens=400
             )
@@ -98,6 +114,30 @@ class NarrativeSession:
         except Exception as e:
             print(f"Erro na API da OpenAI: {e}")
             return "O Mestre parece confuso e não consegue continuar a história. A aventura termina abruptamente. [END]"
+
+    async def get_action_tags_for_narration(self, narration):
+        """Pede à IA para gerar apenas as tags de ação com base na narração fornecida."""
+        tag_prompt = f"""
+        Baseado na seguinte narração que você acabou de criar:
+        ---
+        {narration}
+        ---
+        Gere APENAS as tags de ação apropriadas (como [BATTLE:...], [CREATE_ITEM:...], [REWARD:...], [END]).
+        Se nenhuma ação especial for necessária, não retorne nada.
+        Lembre-se da estrutura da tag de criação de item: `[CREATE_ITEM:name="...",description="...",type="...",slot="...",attack=...,defense=...,rarity="unique"]`.
+        """
+        try:
+            # Chamada de API mais leve, sem o histórico completo, para focar na geração da tag.
+            response = await client.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=[{"role": "system", "content": tag_prompt}],
+                temperature=0.2, # Menos criatividade, mais precisão na formatação da tag
+                max_tokens=200 # 200 tokens é mais que suficiente para uma tag complexa.
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"Erro ao gerar tags de ação: {e}")
+            return "" # Retorna vazio em caso de erro
 
     def parse_actions(self, text):
         """Extrai ações especiais (tags) e o texto da narração."""
@@ -140,6 +180,33 @@ class NarrativeSession:
                 self.player = database.get_character(self.user_id) # Atualiza o estado do jogador
                 await ctx.send(f"🎁 **Recompensa recebida:** {', '.join(reward_msgs)}!")
         
+        elif action_type.upper() == 'CREATE_ITEM':
+            try:
+                # Analisa os parâmetros como um dicionário
+                item_params = dict(re.findall(r'(\w+)="([^"]*)"', params))
+                
+                # Converte valores numéricos
+                for key in ['attack', 'defense']:
+                    if key in item_params:
+                        item_params[key] = int(item_params[key])
+                
+                # Renomeia chaves para corresponder ao banco de dados
+                if 'attack' in item_params: item_params['attack_bonus'] = item_params.pop('attack')
+                if 'defense' in item_params: item_params['defense_bonus'] = item_params.pop('defense')
+                if 'slot' in item_params: item_params['equip_slot'] = item_params.pop('slot')
+                if 'type' in item_params: item_params['item_type'] = item_params.pop('type')
+
+                item_id = database.create_loot_item(item_params)
+                if item_id:
+                    database.add_item_to_inventory(self.user_id, item_id, 1)
+                    await ctx.send(f"✨ **Artefato Conquistado!** ✨\nVocê obteve **{item_params['name']}** e o guardou em seu inventário.")
+                else:
+                    await ctx.send("(O Mestre tentou forjar um item, mas a magia falhou.)")
+
+            except Exception as e:
+                print(f"Erro ao processar a tag CREATE_ITEM: {e} | Parâmetros: {params}")
+                await ctx.send("(A energia da criação se dissipa de forma instável. O item não pôde ser formado.)")
+
         elif action_type.upper() == 'END':
             self.is_complete = True
             await ctx.send("A aventura chegou ao fim.")
@@ -192,10 +259,16 @@ class NarrativeSession:
                 self.history.append({"role": "user", "content": player_msg.content})
 
                 async with ctx.typing():
-                    ai_message = await self.get_ai_response()
+                    # Etapa 1: Gerar a narração
+                    narration_only = await self.get_ai_response()
+                    
+                    # Etapa 2: Gerar as tags com base na narração
+                    tags_only = await self.get_action_tags_for_narration(narration_only)
                 
-                self.history.append({"role": "assistant", "content": ai_message})
-                narration, actions = self.parse_actions(ai_message)
+                # Combina a narração e as tags para manter o histórico consistente
+                full_ai_response = f"{narration_only.strip()} {tags_only.strip()}"
+                self.history.append({"role": "assistant", "content": full_ai_response})
+                narration, actions = self.parse_actions(full_ai_response)
 
                 if narration:
                     await ctx.send(narration)

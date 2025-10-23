@@ -34,6 +34,7 @@ bot.active_pve_battles = {} # Armazena batalhas PVE ativas {user_id: battle_inst
 bot.active_dungeons = {} # Armazena masmorras ativas {user_id: dungeon_instance}
 bot.dungeon_queues = {} # Armazena as filas para masmorras {dungeon_name: [user_id]}
 bot.narrative_sessions = {} # Armazena sessões de narração ativas {user_id: session_instance}
+bot.last_battle_results = {} # Armazena o resultado da última batalha de um jogador {user_id: "resultado"}
 bot.dungeon_match_prompts = {} # Armazena os "pronto-check" {match_id: {players: {user_id: status}}}
 bot.debug_mode = False # Controla a exibição de logs de cálculo no console
 

@@ -108,38 +108,39 @@ def populate_initial_data(cursor):
     # Itens de Loot
     loot_to_add = [
         # name, description, item_type, rarity, min_level_drop, effect_type, effect_value, value, equip_slot, attack_bonus, defense_bonus, effect_duration, boss_drop_id
-        ('Poção de Cura Pequena', 'Restaura 25 HP.', 'potion', 'common', 1, 'HEAL_HP', 25, 10, None, 0, 0, None),
-        ('Poção de Cura Média', 'Restaura 75 HP.', 'potion', 'uncommon', 5, 'HEAL_HP', 75, 50, None, 0, 0, None),
-        ('Poção de Mana Pequena', 'Restaura 20 MP.', 'potion', 'common', 2, 'HEAL_MP', 20, 15, None, 0, 0, None),
-        ('Fruto Dourado', 'Aumenta permanentemente o HP máximo em 5.', 'potion', 'rare', 8, 'INCREASE_MAX_HP', 5, 500, None, 0, 0, None),
-        ('Tomo do Conhecimento', 'Concede 50 de experiência.', 'potion', 'uncommon', 4, 'GAIN_XP', 50, 100, None, 0, 0, None),
-        ('Elixir da Rapidez', 'Aumenta permanentemente a Destreza em 1.', 'potion', 'epic', 10, 'INCREASE_DEXTERITY', 1, 1000, None, 0, 0, None),
+        ('Poção de Cura Pequena', 'Restaura 25 HP.', 'potion', 'common', 1, 'HEAL_HP', 25, 10, None, 0, 0, None, None),
+        ('Poção de Cura Média', 'Restaura 75 HP.', 'potion', 'uncommon', 5, 'HEAL_HP', 75, 50, None, 0, 0, None, None),
+        ('Poção de Mana Pequena', 'Restaura 20 MP.', 'potion', 'common', 2, 'HEAL_MP', 20, 15, None, 0, 0, None, None),
+        ('Fruto Dourado', 'Aumenta permanentemente o HP máximo em 5.', 'potion', 'rare', 8, 'INCREASE_MAX_HP', 5, 500, None, 0, 0, None, None),
+        ('Tomo do Conhecimento', 'Concede 50 de experiência.', 'potion', 'uncommon', 4, 'GAIN_XP', 50, 100, None, 0, 0, None, None),
+        ('Elixir da Rapidez', 'Aumenta permanentemente a Destreza em 1.', 'potion', 'epic', 10, 'INCREASE_DEXTERITY', 1, 1000, None, 0, 0, None, None),
 
-        ('Adaga Enferrujada', 'Uma adaga simples.', 'weapon', 'common', 1, None, None, 5, 'right_hand', 2, 0, None),
-        ('Adaga Envenenada', 'Uma adaga com uma lâmina coberta de veneno que tem 25% de chance de envenenar o alvo em ataques.', 'weapon', 'rare', 6, 'POISON_ON_HIT', 25, 220, 'right_hand', 7, 0, 3),
-        ('Machado de Guerra Orc', 'Bruto e pesado, favorece a força sobre a defesa.', 'weapon', 'uncommon', 4, None, None, 40, 'right_hand', 8, -2, None),
-        ('Arco Élfico', 'Leve e preciso.', 'weapon', 'uncommon', 3, None, None, 55, 'right_hand', 6, 0, None),
-        ('Cajado do Aprendiz', 'Focado em canalizar poder mágico.', 'weapon', 'common', 1, 'SCALE_WITH_INTELLIGENCE', None, 20, 'right_hand', 3, 1, None),
-        ('Martelo de Guerra Anão', 'Uma arma robusta que também oferece boa proteção.', 'weapon', 'rare', 6, None, None, 150, 'right_hand', 10, 2, None),
+        ('Adaga Enferrujada', 'Uma adaga simples.', 'weapon', 'common', 1, None, None, 5, 'right_hand', 2, 0, None, None),
+        ('Adaga Envenenada', 'Uma adaga com uma lâmina coberta de veneno que tem 25% de chance de envenenar o alvo em ataques.', 'weapon', 'rare', 6, 'POISON_ON_HIT', 25, 220, 'right_hand', 7, 0, 3, None),
+        ('Machado de Guerra Orc', 'Bruto e pesado, favorece a força sobre a defesa.', 'weapon', 'uncommon', 4, None, None, 40, 'right_hand', 8, -2, None, None),
+        ('Arco Élfico', 'Leve e preciso.', 'weapon', 'uncommon', 3, None, None, 55, 'right_hand', 6, 0, None, None),
+        ('Cajado do Aprendiz', 'Focado em canalizar poder mágico.', 'weapon', 'common', 1, 'SCALE_WITH_INTELLIGENCE', None, 20, 'right_hand', 3, 1, None, None),
+        ('Martelo de Guerra Anão', 'Uma arma robusta que também oferece boa proteção.', 'weapon', 'rare', 6, None, None, 150, 'right_hand', 10, 2, None, None),
 
-        ('Pele de Lobo', 'Pode ser útil para artesanato.', 'material', 'common', 1, None, None, 3, None, 0, 0, None),
-        ('Espada Curta de Ferro', 'Uma espada confiável.', 'weapon', 'uncommon', 3, None, None, 20, 'right_hand', 5, 0, None),
+        ('Pele de Lobo', 'Pode ser útil para artesanato.', 'material', 'common', 1, None, None, 3, None, 0, 0, None, None),
+        ('Espada Curta de Ferro', 'Uma espada confiável.', 'weapon', 'uncommon', 3, None, None, 20, 'right_hand', 5, 0, None, None),
 
-        ('Peitoral de Couro', 'Oferece proteção básica.', 'armor', 'common', 2, None, None, 25, 'chest', 0, 3, None),
-        ('Elmo de Ferro', 'Proteção sólida para a cabeça.', 'armor', 'common', 3, None, None, 30, 'helmet', 0, 2, None),
-        ('Calças de Malha', 'Flexíveis e resistentes.', 'armor', 'uncommon', 4, None, None, 45, 'legs', 0, 4, None),
-        ('Peitoral de Aço', 'Excelente proteção, mas pesado.', 'armor', 'rare', 7, None, None, 200, 'chest', -1, 10, None),
-        ('Botas de Couro Leve', 'Aumentam a agilidade do usuário.', 'armor', 'common', 2, None, None, 20, 'legs', 0, 1, None),
+        ('Peitoral de Couro', 'Oferece proteção básica.', 'armor', 'common', 2, None, None, 25, 'chest', 0, 3, None, None),
+        ('Elmo de Ferro', 'Proteção sólida para a cabeça.', 'armor', 'common', 3, None, None, 30, 'helmet', 0, 2, None, None),
+        ('Calças de Malha', 'Flexíveis e resistentes.', 'armor', 'uncommon', 4, None, None, 45, 'legs', 0, 4, None, None),
+        ('Peitoral de Aço', 'Excelente proteção, mas pesado.', 'armor', 'rare', 7, None, None, 200, 'chest', -1, 10, None, None),
+        ('Botas de Couro Leve', 'Aumentam a agilidade do usuário.', 'armor', 'common', 2, None, None, 20, 'legs', 0, 1, None, None),
 
-        ('Anel do Vampiro', 'Cura o usuário em 25% do dano causado por ataques.', 'armor', 'rare', 5, 'LIFESTEAL_PERCENT', 25, 250, 'ring', 0, 0, None),
-        ('Anel da Avareza', 'Aumenta o ouro ganho em batalhas em 15%.', 'armor', 'uncommon', 3, 'GOLD_BONUS_PERCENT', 15, 150, 'ring', 0, 0, None),
-        ('Anel do Sábio', 'Aumenta a experiência ganha em 10%.', 'armor', 'uncommon', 3, 'XP_BONUS_PERCENT', 10, 150, 'ring', 0, 0, None),
-        ('Anel da Precisão', 'Aumenta a chance de causar dano crítico.', 'armor', 'rare', 6, 'CRIT_CHANCE_PERCENT', 10, 300, 'ring', 0, 0, None),
-        ('Anel da Regeneração', 'Regenera uma pequena quantidade de MP a cada turno.', 'armor', 'epic', 10, 'MP_REGEN_FLAT', 2, 500, 'ring', 0, 0, None),
+        ('Anel do Vampiro', 'Cura o usuário em 25% do dano causado por ataques.', 'armor', 'rare', 5, 'LIFESTEAL_PERCENT', 25, 250, 'ring', 0, 0, None, None),
+        ('Anel da Avareza', 'Aumenta o ouro ganho em batalhas em 15%.', 'armor', 'uncommon', 3, 'GOLD_BONUS_PERCENT', 15, 150, 'ring', 0, 0, None, None),
+        ('Anel do Sábio', 'Aumenta a experiência ganha em 10%.', 'armor', 'uncommon', 3, 'XP_BONUS_PERCENT', 10, 150, 'ring', 0, 0, None, None),
+        ('Anel da Precisão', 'Aumenta a chance de causar dano crítico.', 'armor', 'rare', 6, 'CRIT_CHANCE_PERCENT', 10, 300, 'ring', 0, 0, None, None),
+        ('Anel da Regeneração', 'Regenera uma pequena quantidade de MP a cada turno.', 'armor', 'epic', 10, 'MP_REGEN_FLAT', 2, 500, 'ring', 0, 0, None, None),
 
-        ('Gema de Arma', 'Uma gema necessária para aprimorar armas.', 'material', 'rare', 10, None, None, 1000, None, 0, 0, None),
-        ('Gema de Armadura', 'Uma gema necessária para aprimorar armaduras.', 'material', 'rare', 10, None, None, 1000, None, 0, 0, None),
-        ('Gema de Acessório', 'Uma gema rara usada para aprimorar anéis e outros acessórios.', 'material', 'epic', 20, None, None, 2500, None, 0, 0, None),
+        ('Gema de Arma', 'Uma gema necessária para aprimorar armas.', 'material', 'rare', 10, None, None, 1000, None, 0, 0, None, None),
+        ('Gema de Armadura', 'Uma gema necessária para aprimorar armaduras.', 'material', 'rare', 10, None, None, 1000, None, 0, 0, None, None),
+        ('Gema de Acessório', 'Uma gema rara usada para aprimorar anéis e outros acessórios.', 'material', 'epic', 20, None, None, 2500, None, 0, 0, None, None),
+        ('Gema de Item Único', 'Uma gema mística usada para aprimorar artefatos de poder singular.', 'material', 'unique', 25, None, None, 5000, None, 0, 0, None, None),
 
         # Loots de Chefe
         ('Coroa do Rei Goblin', 'Uma coroa tosca, mas um troféu de valor.', 'armor', 'rare', 5, None, None, 500, 'helmet', 1, 5, None, 1), # Drop do Rei Goblin (ID 1)
@@ -149,7 +150,7 @@ def populate_initial_data(cursor):
     for item_data in loot_to_add:
         cursor.execute("SELECT COUNT(*) FROM loot_table WHERE name = ?", (item_data[0],))
         if cursor.fetchone()[0] == 0:
-            print(f"Creating missing item: {item_data[0]}")
+            print(f"Criando item faltante: {item_data[0]}")
             cursor.execute(
                 "INSERT INTO loot_table (name, description, item_type, rarity, min_level_drop, effect_type, effect_value, value, equip_slot, attack_bonus, defense_bonus, effect_duration, boss_drop_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 item_data
@@ -1296,6 +1297,27 @@ def save_narrative_history(user_id, history):
         )
         return cursor.rowcount > 0
 
+def create_loot_item(item_data):
+    """Cria um novo item na loot_table e retorna seu ID."""
+    with db_cursor() as cursor:
+        # Garante que os campos numéricos tenham um padrão
+        item_data.setdefault('attack_bonus', 0)
+        item_data.setdefault('defense_bonus', 0)
+        item_data.setdefault('value', 0) # Itens criados pela IA não são vendáveis na loja
+        item_data.setdefault('min_level_drop', 1)
+
+        # Define a ordem correta das colunas para a inserção
+        columns = ['name', 'description', 'item_type', 'rarity', 'min_level_drop', 'equip_slot', 'attack_bonus', 'defense_bonus', 'value']
+        values = [item_data.get(col) for col in columns]
+
+        query = f"INSERT INTO loot_table ({', '.join(columns)}) VALUES ({', '.join(['?'] * len(columns))})"
+        
+        try:
+            cursor.execute(query, values)
+            return cursor.lastrowid
+        except sqlite3.Error as e:
+            print(f"Erro ao criar item no banco de dados: {e}")
+            return None
 
 
 if __name__ == "__main__":

@@ -231,37 +231,60 @@ class PlayerActions(commands.Cog):
         # 3. Verificar a quantidade e os detalhes do item
         item_details = items_to_enhance[0]
         _, item_id, _, name, _, item_type, _, _, equip_slot, _ = item_details
-        total_quantity = sum(item[2] for item in items_to_enhance) # item[2] é a quantidade (para stacks)
+        
+        # Busca os detalhes completos do item na loot_table para pegar a raridade
+        full_item_details = database.get_item_by_id(item_id)
+        item_rarity = full_item_details.get('rarity')
 
         if item_type not in ['weapon', 'armor']:
             await ctx.send(f"**{name}** não é um item aprimorável.")
             return
 
-        if total_quantity < 2:
+        # 4. Determinar materiais necessários com base na raridade
+        if item_rarity == 'unique':
+            required_items = 1
+            gem_name = "Gema de Item Único"
+        else:
+            required_items = 2
+            if item_type == 'weapon':
+                gem_name = "Gema de Arma"
+            elif item_type == 'armor' and equip_slot == 'ring':
+                gem_name = "Gema de Acessório"
+            else:
+                gem_name = "Gema de Armadura"
+
+        # 5. Verificar se o jogador tem os materiais
+        total_quantity = sum(item[2] for item in items_to_enhance) # item[2] é a quantidade (para stacks)
+        if total_quantity < required_items:
             display_name = f"{name} +{current_enhancement}" if current_enhancement > 0 else name
-            await ctx.send(f"Você precisa de pelo menos 2x **{display_name}** para tentar o aprimoramento. Você tem {total_quantity}.")
+            await ctx.send(f"Você precisa de **{required_items}x {display_name}** para tentar o aprimoramento. Você tem {total_quantity}.")
             return
 
-        # 4. Determinar e verificar a gema necessária
-        if item_type == 'weapon':
-            gem_name = "Gema de Arma"
-        elif item_type == 'armor' and equip_slot == 'ring':
-            gem_name = "Gema de Acessório"
-        else:
-            gem_name = "Gema de Armadura"
         gem_item = database.get_item_by_name(gem_name)
+        if not gem_item:
+            await ctx.send(f"Erro de configuração: A **{gem_name}** não foi encontrada no banco de dados.")
+            return
+
         gem_in_inventory = next((item for item in inventory if item[1] == gem_item['id']), None)
         if not gem_in_inventory:
             await ctx.send(f"Você não possui a **{gem_name}** necessária para o aprimoramento.")
             return
 
-        # 5. Consumir materiais e criar o novo item
-        database.remove_item_from_inventory(user_id, item_id, 2, enhancement_level=current_enhancement)
-        database.remove_item_from_inventory(user_id, gem_item['id'], 1)
-        database.add_item_to_inventory(user_id, item_id, 1, current_enhancement + 1)
+        # 6. Consumir materiais e criar o novo item, com lógica especial para itens únicos
+        if item_rarity == 'unique':
+            # Para itens únicos, remove o item antigo e a gema, e adiciona o novo item aprimorado.
+            # O item base não é consumido como material, ele é transformado.
+            database.remove_item_from_inventory(user_id, item_id, 1, enhancement_level=current_enhancement)
+            database.remove_item_from_inventory(user_id, gem_item['id'], 1)
+            database.add_item_to_inventory(user_id, item_id, 1, current_enhancement + 1)
+        else:
+            # Para itens normais, consome os itens base e a gema.
+            database.remove_item_from_inventory(user_id, item_id, required_items, enhancement_level=current_enhancement)
+            database.remove_item_from_inventory(user_id, gem_item['id'], 1)
+            database.add_item_to_inventory(user_id, item_id, 1, current_enhancement + 1)
 
         new_name = f"{name} +{current_enhancement + 1}"
-        await ctx.send(f"✨ **SUCESSO!** ✨\nVocê aprimorou seu equipamento e criou uma **{new_name}**!")
+        await ctx.send(f"✨ **SUCESSO!** ✨\nVocê aprimorou seu equipamento e criou um(a) **{new_name}**!")
 
     @commands.command(name="equip", help="Equipa um item do seu inventário.")
     async def equip(self, ctx, *, item_name: str):
